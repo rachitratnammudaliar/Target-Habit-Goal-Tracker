@@ -1,0 +1,48 @@
+name: Target
+options:
+  bundleIdPrefix: com.rachitratnammudaliar
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Target:
+    type: application
+    platform: iOS
+    sources: [Target]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rachitratnammudaliar.target
+        PRODUCT_NAME: Target
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Target
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.healthcare-fitness
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_PREVIEWS: YES
+  TargetTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [TargetTests]
+    dependencies:
+      - target: Target
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.rachitratnammudaliar.target.tests
+schemes:
+  Target:
+    build:
+      targets:
+        Target: all
+        TargetTests: [test]
+    test:
+      targets: [TargetTests]

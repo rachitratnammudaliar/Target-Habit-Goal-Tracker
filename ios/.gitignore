@@ -1,0 +1,4 @@
+Target.xcodeproj/
+build/
+build-test/
+Payload/
