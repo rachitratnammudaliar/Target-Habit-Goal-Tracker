@@ -215,7 +215,7 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
                     NumberField(stepText, { stepText = it }, "Each ＋ adds", isError = showErrors && stepValue == null, error = "A number above 0")
                     Hint("Leave it empty for ${Amounts.withUnit(if (healthValue != HealthSource.NONE) healthValue.step else 1.0, unit)}.")
                 }
-                Kind.CHECK -> Hint("Tap ✓ when you've done it.")
+                Kind.CHECK -> {}
             }
 
             SectionLabel("Which days")

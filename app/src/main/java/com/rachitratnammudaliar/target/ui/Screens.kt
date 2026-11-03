@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DateRange
@@ -262,9 +264,9 @@ private fun TodayScreen(
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item(key = "day") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { onDay(day.minusDays(1)) }) { Text("‹") }
+                IconButton(onClick = { onDay(day.minusDays(1)) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Day before") }
                 Text(dayLabel(day, today), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-                TextButton(onClick = { onDay(day.plusDays(1)) }, enabled = day.isBefore(today)) { Text("›") }
+                IconButton(onClick = { onDay(day.plusDays(1)) }, enabled = day.isBefore(today)) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next day") }
             }
         }
         item(key = "summary") {
@@ -360,6 +362,7 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
                     kind == Kind.BY_TIME && Goals.time(logs) != null -> (if (result == Result.DONE) "Done at " else "Late: ") + Times.format(Goals.time(logs)!!) + " · target ${Times.format(t.timeMinutes)}"
                     kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit)
                     result == Result.DONE -> "Done"
+                    kind == Kind.CHECK -> if (result == Result.MISSED) "Missed" else "Not done yet"
                     else -> Goals.goalText(goal, t.unit) + if (result == Result.MISSED) " · missed" else ""
                 }
                 Text(

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- **Fixed:** a "done or not" target like Gym said "Done" before you'd ticked it. It now says "Not done yet"
+- Chart dates are readable, and the day arrows on Today are bigger
 ## 1.0.0
 
 The first version of Target, for Android and iPhone.

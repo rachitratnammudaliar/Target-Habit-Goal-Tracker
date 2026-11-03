@@ -103,7 +103,7 @@ struct TargetRow: View {
                 if let m = logged { return (result == .done ? "Done at " : "Late: ") + Times.format(m) + " · target \(Times.format(t.timeMinutes))" }
                 return Goals.goalText(goal, t.unit) + (result == .missed ? " · missed" : "")
             case .AMOUNT: return Goals.progressText(goal, logs, t.unit)
-            case .CHECK: return result == .done ? "Done" : "Done or not" + (result == .missed ? " · missed" : "")
+            case .CHECK: return result == .done ? "Done" : result == .missed ? "Missed" : "Not done yet"
             }
         }()
 

@@ -221,18 +221,7 @@ fun BarChart(
             }
         }
         Spacer(Modifier.height(4.dp))
-        Row(Modifier.fillMaxWidth()) {
-            labels.forEachIndexed { i, l ->
-                Text(
-                    if (i % labelEvery == 0) l else "",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+        AxisLabels(labels, labelEvery)
     }
 }
 
@@ -278,10 +267,23 @@ fun TimeChart(minutes: List<Int?>, labels: List<String>, target: Int, height: Dp
             }
         }
         Spacer(Modifier.height(4.dp))
-        Row(Modifier.fillMaxWidth().padding(start = 44.dp)) {
-            labels.forEachIndexed { i, l ->
-                Text(if (i % labelEvery == 0) l else "", style = MaterialTheme.typography.labelSmall, color = goalColor, maxLines = 1, modifier = Modifier.weight(1f))
+        Box(Modifier.padding(start = 44.dp)) { AxisLabels(labels, labelEvery) }
+    }
+}
+
+/** Labels under a chart: one per bar when there's room, otherwise a few spread across. */
+@Composable
+private fun AxisLabels(labels: List<String>, every: Int) {
+    if (every <= 1) {
+        Row(Modifier.fillMaxWidth()) {
+            labels.forEach { l ->
+                Text(l, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.weight(1f))
             }
+        }
+    } else {
+        val shown = labels.indices.filter { it % every == 0 || it == labels.lastIndex }.distinct()
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            shown.forEach { i -> Text(labels[i], style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) }
         }
     }
 }
