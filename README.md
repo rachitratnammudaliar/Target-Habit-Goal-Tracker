@@ -2,6 +2,8 @@
 
 **An offline habit and goal tracker for Android and iPhone. Set daily targets, log them with a tap, and see how often you hit them.**
 
+🌐 **[rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker](https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/)**
+
 Wake up by 7:00. At the library by 9:00. Run 5 km. 10,000 steps. Target is for **physical daily targets**, not to-do lists: each day every target is hit, late, missed or skipped, and charts show your streaks and hit rate. On Android, **Samsung Health ticks your fitness targets for you**. Your data never leaves your phone: no internet, no account, no ads and no tracking.
 
 <p>

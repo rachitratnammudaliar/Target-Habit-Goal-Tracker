@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Target: habit and goal tracker for Android and iPhone, with Samsung Health</title>
+  <meta name="description" content="Target is a free, offline habit and goal tracker for Android and iPhone. Set daily targets like wake up by 7:00 or run 5 km, log them with a tap, and see streaks, hit rates and charts. Samsung Health ticks fitness targets automatically.">
+  <meta name="author" content="Rachit Ratnam Mudaliar">
+  <link rel="canonical" href="https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/">
+  <meta name="theme-color" content="#4F46E5">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Target">
+  <meta property="og:title" content="Target: habit and goal tracker for Android and iPhone, with Samsung Health">
+  <meta property="og:description" content="Target is a free, offline habit and goal tracker for Android and iPhone. Set daily targets like wake up by 7:00 or run 5 km, log them with a tap, and see streaks, hit rates and charts. Samsung Health ticks fitness targets automatically.">
+  <meta property="og:url" content="https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/">
+  <meta property="og:image" content="https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/img/card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234F46E5'/%3E%3Ctext x='32' y='44' font-family='Arial' font-weight='700' font-size='34' text-anchor='middle' fill='white'%3ET%3C/text%3E%3C/svg%3E">
+  <style>
+@font-face{font-family:"Inter Display";src:url("/assets/fonts/inter-display-500.woff") format("woff");font-weight:500;font-display:swap}
+@font-face{font-family:"Inter Display";src:url("/assets/fonts/inter-display-600.woff") format("woff");font-weight:600;font-display:swap}
+@font-face{font-family:"Lora";src:url("/assets/fonts/lora-italic-var.woff") format("woff");font-weight:400 700;font-style:italic;font-display:swap}
+:root{
+  --accent:#4F46E5;--accent-deep:#312E81;--accent-soft:#E8E7FD;
+  --paper:#f7f8f6;--surface:#fff;--ink:#121614;--graphite:#4d5651;--rule:#e2e6e3;
+  --on-accent:#fff;--shadow:0 30px 70px -35px rgba(10,20,15,.45);
+  --sans:"Inter Display",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Lora",ui-serif,Georgia,serif;
+  --max:72rem;--gutter:clamp(1rem,4vw,2.5rem);color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --accent:#B4B0FF;--accent-soft:#1C1B3A;--paper:#0b0e0d;--surface:#141917;--ink:#eef2ef;
+  --graphite:#a9b3ad;--rule:#26302b;--on-accent:#0b0e0d;--shadow:0 30px 70px -35px rgba(0,0,0,.9);color-scheme:dark}}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:500 1.0625rem/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 var(--gutter)}
+.skip{position:absolute;left:-999px}.skip:focus{left:1rem;top:1rem;background:var(--surface);padding:.5rem 1rem;z-index:9}
+header.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--paper) 82%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--rule)}
+.top .wrap{display:flex;align-items:center;gap:1rem;min-height:4rem}
+.brand{display:flex;align-items:center;gap:.6rem;text-decoration:none;font-weight:600;font-size:1.15rem}
+.icon{width:2.1rem;height:2.1rem;border-radius:.6rem;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-weight:600}
+nav.links{margin-left:auto;display:flex;gap:1.25rem;font-size:.95rem}
+nav.links a{text-decoration:none;color:var(--graphite)}nav.links a:hover{color:var(--ink)}
+@media (max-width:720px){nav.links{display:none}}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:3rem;padding:.75rem 1.4rem;border-radius:999px;font-weight:600;text-decoration:none;border:1px solid transparent;transition:transform .15s}
+.btn:hover{transform:translateY(-1px)}
+.btn-main{background:var(--accent);color:var(--on-accent);box-shadow:0 14px 30px -14px var(--accent)}
+.btn-line{border-color:var(--rule);background:var(--surface)}
+.btn-small{min-height:2.4rem;padding:.45rem 1rem;font-size:.92rem}
+.hero{padding:clamp(2.5rem,7vw,5rem) 0 3rem}
+.hero .wrap{display:grid;grid-template-columns:1.15fr .85fr;gap:clamp(2rem,5vw,4rem);align-items:center}
+@media (max-width:860px){.hero .wrap{grid-template-columns:1fr}}
+.kicker{display:inline-block;font-size:.85rem;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:.3rem .8rem;border-radius:999px}
+h1{font-size:clamp(2.3rem,5.4vw,4rem);line-height:1.05;letter-spacing:-.035em;margin:1rem 0 1.1rem;font-weight:600}
+h1 em,h2 em{font-family:var(--serif);font-weight:500;color:var(--accent)}
+.lead{font-size:1.15rem;color:var(--graphite);max-width:36rem;margin:0 0 1.75rem}
+.actions{display:flex;flex-wrap:wrap;gap:.75rem}
+.note{font-size:.9rem;color:var(--graphite);margin-top:1rem}
+.phone{justify-self:center;width:min(300px,78vw);aspect-ratio:9/20;border-radius:2.4rem;padding:.65rem;background:#111;box-shadow:var(--shadow);transform:rotate(2deg)}
+.phone img{width:100%;height:100%;object-fit:cover;object-position:top;border-radius:1.85rem}
+section{padding:clamp(3rem,7vw,5rem) 0;scroll-margin-top:4rem}
+h2{font-size:clamp(1.8rem,3.6vw,2.6rem);letter-spacing:-.03em;line-height:1.1;margin:0 0 .6rem;font-weight:600}
+.sub{color:var(--graphite);max-width:40rem;margin:0 0 2.25rem}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem}
+@media (max-width:1000px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.grid{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:1.4rem;padding:1.4rem}
+.card .e{font-size:1.6rem;line-height:1}
+.card h3{margin:.8rem 0 .35rem;font-size:1.08rem;letter-spacing:-.01em}
+.card p{margin:0;color:var(--graphite);font-size:.97rem;line-height:1.55}
+.shots{display:flex;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;padding:.5rem var(--gutter) 1.5rem;margin:0 calc(var(--gutter)*-1)}
+.shots figure{flex:0 0 auto;width:min(230px,62vw);margin:0;scroll-snap-align:start}
+.shots img{border-radius:1.4rem;border:1px solid var(--rule);box-shadow:var(--shadow);aspect-ratio:9/20;object-fit:cover;width:100%;height:auto;background:var(--surface)}
+.shots figcaption{font-size:.85rem;color:var(--graphite);margin-top:.6rem}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+.steps{margin:.75rem 0 0;padding-left:1.2rem;color:var(--graphite)}.steps li{margin:.35rem 0}
+.steps b{color:var(--ink)}
+.band{background:var(--accent-soft)}
+.priv{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem}
+@media (max-width:900px){.priv{grid-template-columns:1fr 1fr}}@media (max-width:520px){.priv{grid-template-columns:1fr}}
+.priv div{border-top:2px solid var(--accent);padding-top:.9rem}
+.priv h3{margin:0 0 .3rem;font-size:1.02rem}.priv p{margin:0;color:var(--graphite);font-size:.95rem}
+.maker{display:grid;grid-template-columns:auto 1fr;gap:clamp(1.25rem,4vw,2.5rem);align-items:center}
+@media (max-width:640px){.maker{grid-template-columns:1fr}}
+.maker img{width:clamp(120px,22vw,180px);height:auto;aspect-ratio:1;border-radius:50%;object-fit:cover;border:4px solid var(--surface);box-shadow:var(--shadow)}
+.maker p{color:var(--graphite);margin:.5rem 0}
+.maker .actions{margin-top:1.25rem}
+.other{display:flex;align-items:center;gap:1rem;text-decoration:none;margin-top:1rem}
+.other .icon{width:2.6rem;height:2.6rem}
+footer{border-top:1px solid var(--rule);padding:2rem 0 3rem;color:var(--graphite);font-size:.9rem}
+footer .wrap{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;justify-content:space-between}
+footer a{color:var(--graphite)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+  <script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "MobileApplication",
+      "@id": "https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/#app",
+      "name": "Target",
+      "url": "https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/",
+      "description": "Target is a free, offline habit and goal tracker for Android and iPhone. Set daily targets like wake up by 7:00 or run 5 km, log them with a tap, and see streaks, hit rates and charts. Samsung Health ticks fitness targets automatically.",
+      "operatingSystem": "Android 8.0+, iOS 16+",
+      "applicationCategory": "HealthApplication",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "EUR"
+      },
+      "downloadUrl": "https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest",
+      "screenshot": [
+        "https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/img/home.webp",
+        "https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/img/progress.webp",
+        "https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/img/wake.webp",
+        "https://rachitratnammudaliar.github.io/Target-Habit-Goal-Tracker/img/run.webp"
+      ],
+      "author": {
+        "@id": "https://rachitratnammudaliar.github.io/#person"
+      },
+      "isAccessibleForFree": true
+    },
+    {
+      "@type": "Person",
+      "@id": "https://rachitratnammudaliar.github.io/#person",
+      "name": "Rachit Ratnam Mudaliar",
+      "url": "https://rachitratnammudaliar.github.io/",
+      "jobTitle": [
+        "Software Systems Student",
+        "Software Developer"
+      ],
+      "sameAs": [
+        "https://github.com/rachitratnammudaliar",
+        "https://www.linkedin.com/in/rachitratnammudaliar",
+        "https://rachitratnammudaliar.blogspot.com/"
+      ]
+    }
+  ]
+}</script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="#main"><span class="icon" aria-hidden="true">T</span>Target</a>
+      <nav class="links" aria-label="Sections">
+        <a href="#features">Features</a><a href="#screens">Screens</a><a href="#download">Download</a><a href="#privacy">Privacy</a><a href="#maker">Made by</a>
+      </nav>
+      <a class="btn btn-main btn-small" href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest">Download</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="h1">
+      <div class="wrap">
+        <div>
+          <span class="kicker">Habit and goal tracker · Android and iPhone · Free</span>
+          <h1 id="h1">Hit your <em>daily targets,</em> and see it.</h1>
+          <p class="lead">Wake up by 7:00. At the library by 9:00. Run 5 km. 10,000 steps. Log each one with a tap, or let Samsung Health tick it for you, and watch your streaks and hit rate grow.</p>
+          <div class="actions">
+            <a class="btn btn-main" href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest">Download for Android</a>
+            <a class="btn btn-line" href="#download">iPhone and iPad</a>
+          </div>
+          <p class="note">Works fully offline. No account, no ads, no tracking. Open source on <a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker">GitHub</a>.</p>
+        </div>
+        <div class="phone"><img src="img/home.webp" width="540" height="1200" alt="Today: targets, a progress ring and streaks" fetchpriority="high"></div>
+      </div>
+    </section>
+
+    <section id="features" aria-labelledby="features-h">
+      <div class="wrap">
+        <h2 id="features-h">Everything it does, <em>offline.</em></h2>
+        <p class="sub">Made for everyday use: a few taps, clear numbers, nothing to set up.</p>
+        <div class="grid">
+        <article class="card"><div class="e" aria-hidden="true">⏰</div><h3>By a time</h3><p>&quot;Wake up by 7:00.&quot; Tap ✓ Now and it saves the time: on time is a hit, after is late.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">🏃</div><h3>Samsung Health</h3><p>Steps, running distance, active time and calories tick your targets by themselves, read on your phone through Health Connect.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">🔥</div><h3>Streaks</h3><p>Current and best streak for every target. Rest days and skipped days never break one.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">📊</div><h3>Hit rate</h3><p>How often you hit your targets over 7, 30 or 90 days, with a bar for every day.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">🟩</div><h3>Heatmaps</h3><p>A calendar for each target: done, late, missed, skipped or a rest day, at a glance.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">📈</div><h3>Charts that mean something</h3><p>Your wake-up times against 7:00, your km against the goal, your gym days each week.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">📅</div><h3>Your days</h3><p>Every day, weekdays, weekends or just Mon, Wed and Fri. Other days don&#x27;t count.</p></article>
+        <article class="card"><div class="e" aria-hidden="true">🎯</div><h3>Targets, not to-dos</h3><p>Physical daily goals with a clear yes or no, not a list of chores.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="screens" aria-labelledby="screens-h">
+      <div class="wrap">
+        <h2 id="screens-h">See it in action</h2>
+        <p class="sub">Real screenshots, taken automatically from the latest Android build. Scroll sideways for more.</p>
+        <div class="shots" tabindex="0" aria-label="Screenshots">
+        <figure><img src="img/home.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Today: targets, a progress ring and streaks"><figcaption>Today: targets, a progress ring and streaks</figcaption></figure>
+        <figure><img src="img/progress.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Progress: hit rate and a heatmap for each target"><figcaption>Progress: hit rate and a heatmap for each target</figcaption></figure>
+        <figure><img src="img/wake.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Wake-up times against the target"><figcaption>Wake-up times against the target</figcaption></figure>
+        <figure><img src="img/run.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Running, filled in from Samsung Health"><figcaption>Running, filled in from Samsung Health</figcaption></figure>
+        <figure><img src="img/new.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Creating a target"><figcaption>Creating a target</figcaption></figure>
+        <figure><img src="img/settings.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Connecting Samsung Health"><figcaption>Connecting Samsung Health</figcaption></figure>
+        <figure><img src="img/home-dark.webp" width="540" height="1200" loading="lazy" decoding="async" alt="Today in dark mode"><figcaption>Today in dark mode</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="download" class="band" aria-labelledby="download-h">
+      <div class="wrap">
+        <h2 id="download-h">Download Target</h2>
+        <p class="sub">Free. Get the latest version from GitHub. It isn't in an app store yet, so your phone asks you to confirm the first time. Updates install over the old version and keep your data.</p>
+        <div class="two">
+          <article class="card">
+            <h3>Android 8.0 and newer</h3>
+            <ol class="steps">
+              <li>Open <a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest"><b>the latest release</b></a> on your phone and tap <b>Target-…-Android.apk</b>.</li>
+              <li>Open the file. If asked, allow your browser or Files app to <b>install unknown apps</b>.</li>
+              <li>If Play Protect warns about an unknown developer, tap <b>More details → Install anyway</b>.</li>
+              <li>Samsung Galaxy: if it's blocked, turn off <b>Auto Blocker</b> in Security and privacy, install, then turn it back on.</li>
+            </ol>
+            <p style="margin-top:1rem"><a class="btn btn-main btn-small" href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest">Get the Android app</a></p>
+          </article>
+          <article class="card">
+            <h3>iPhone and iPad, iOS 16 and newer</h3>
+            <ol class="steps">
+              <li>Download <b>Target-…-iOS.ipa</b> from <a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest">the latest release</a> on a Windows PC or Mac.</li>
+              <li>Install it with <a href="https://sideloadly.io"><b>Sideloadly</b></a> or <a href="https://altstore.io"><b>AltStore</b></a> and your Apple ID.</li>
+              <li>On the iPhone: <b>Settings → General → VPN &amp; Device Management</b>, trust your Apple ID, and turn on <b>Developer Mode</b>.</li>
+              <li>With a free Apple ID, refresh it every 7 days (AltStore does it for you).</li>
+            </ol>
+            <p style="margin-top:1rem"><a class="btn btn-line btn-small" href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/releases/latest">Get the iPhone file</a></p>
+          </article>
+        </div>
+        <p class="note">Switching phones? Android and iPhone read the same backup file: <b>Settings → Export</b> on one, <b>Import</b> on the other.</p>
+      </div>
+    </section>
+
+    <section id="privacy" aria-labelledby="privacy-h">
+      <div class="wrap">
+        <h2 id="privacy-h">Your data <em>never leaves</em> your phone</h2>
+        <p class="sub">No servers to trust, because there aren't any. <a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/blob/main/PRIVACY.md">Read the privacy policy</a>.</p>
+        <div class="priv">
+        <div><h3>No internet</h3><p>The app has no internet permission at all.</p></div>
+        <div><h3>Only on your phone</h3><p>Targets and history stay in the app&#x27;s private storage.</p></div>
+        <div><h3>Health data stays put</h3><p>Read-only, on the phone, only to tick your targets. Never written or shared.</p></div>
+        <div><h3>No account, ads or tracking</h3><p>Open it and start. Nothing to sign up for.</p></div>
+        </div>
+        <p class="note">Built with Kotlin, Jetpack Compose, Room and Health Connect on Android; Swift, SwiftUI and Swift Charts on iPhone, with the same logic and the same tests on both. Every change is tested automatically on GitHub before a release.</p>
+      </div>
+    </section>
+
+    <section id="maker" class="band" aria-labelledby="maker-h">
+      <div class="wrap">
+        <div class="maker">
+          <img src="/assets/img/rachit-ratnam-mudaliar.webp" width="180" height="180" alt="Rachit Ratnam Mudaliar" loading="lazy">
+          <div>
+            <h2 id="maker-h">Made by Rachit Ratnam Mudaliar</h2>
+            <p>I'm a Software Systems student at Kauno Kolegija in Kaunas, Lithuania, and a developer who builds and publishes his own apps. I grew up in Birsinghpur Pali, Madhya Pradesh, India, spent two years at a military school in Dehradun, and have been curious about how computers work since I was four.</p>
+            <p>I build apps I use myself: offline, private and free. Target is one of them; all of my published apps and their code are on my GitHub.</p>
+            <div class="actions">
+              <a class="btn btn-main btn-small" href="https://rachitratnammudaliar.github.io/">About me</a>
+              <a class="btn btn-line btn-small" href="https://github.com/rachitratnammudaliar?tab=repositories">All my repositories</a>
+              <a class="btn btn-line btn-small" href="https://www.linkedin.com/in/rachitratnammudaliar">LinkedIn</a>
+              <a class="btn btn-line btn-small" href="https://rachitratnammudaliar.blogspot.com/">Blog</a>
+              <a class="btn btn-line btn-small" href="mailto:rachit.work@protonmail.com">Email</a>
+            </div>
+            <a class="other card" href="https://rachitratnammudaliar.github.io/Duedial/">
+              <span class="icon" style="background:#0B5FA5;color:#fff" aria-hidden="true">D</span>
+              <span><b>Also by Rachit: Duedial</b><br><span style="color:var(--graphite);font-size:.95rem">Subscription tracker for Android and iPhone →</span></span>
+            </a>
+            <a class="other card" href="https://rachitratnammudaliar.github.io/Kitchtally/">
+              <span class="icon" style="background:#2E6B3A;color:#fff" aria-hidden="true">K</span>
+              <span><b>Also by Rachit: Kitchtally</b><br><span style="color:var(--graphite);font-size:.95rem">Pantry and grocery tracker for Android and iPhone →</span></span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>© 2026 <a href="https://rachitratnammudaliar.github.io/">Rachit Ratnam Mudaliar</a> · MIT licence</span>
+      <span><a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker">Source code</a> · <a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/blob/main/CHANGELOG.md">What's new</a> · <a href="https://github.com/rachitratnammudaliar/Target-Habit-Goal-Tracker/blob/main/PRIVACY.md">Privacy</a></span>
+    </div>
+  </footer>
+</body>
+</html>
