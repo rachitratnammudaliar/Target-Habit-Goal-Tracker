@@ -385,7 +385,7 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
                         (if (result == Result.DONE) "Done at " else "Late: ") + Times.format(Goals.time(logs)!!) + " · target ${Times.format(target)}"
                     overdue -> "Overdue · target ${Times.format(target)}"
                     kind == Kind.BY_TIME -> "By ${Times.format(target)}" + (if (movedToday) " today" else "") + if (result == Result.MISSED) " · missed" else ""
-                    kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit) + if (goal.weekly) " · $weekCount of ${goal.weeklyTimes} this week" else ""
+                    kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit) + if (goal.weekly) " · $weekCount/${goal.weeklyTimes} this wk" else ""
                     goal.weekly -> (if (result == Result.DONE) "Done · " else "") + "$weekCount of ${goal.weeklyTimes} this week"
                     result == Result.DONE -> "Done"
                     result == Result.MISSED -> "Missed"

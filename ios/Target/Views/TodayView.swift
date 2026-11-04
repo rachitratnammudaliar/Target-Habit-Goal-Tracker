@@ -122,8 +122,8 @@ struct TargetRow: View {
             if result == .skipped { return "Skipped" }
             if goal.weekly {
                 let n = Goals.timesInWeek(goal, byDay, Goals.weekStart(day), today)
-                let base = "\(n) of \(goal.weeklyTimes) this week"
-                return t.kindValue == .AMOUNT ? base + " · " + Goals.progressText(goal, logs, t.unit) : base + (result == .done ? " · done today" : "")
+                if t.kindValue == .AMOUNT { return Goals.progressText(goal, logs, t.unit) + " · \(n)/\(goal.weeklyTimes) this wk" }
+                return "\(n) of \(goal.weeklyTimes) this week" + (result == .done ? " · done today" : "")
             }
             switch t.kindValue {
             case .BY_TIME:
