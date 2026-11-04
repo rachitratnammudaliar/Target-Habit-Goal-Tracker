@@ -98,25 +98,74 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { onLogged(dao.insert(entry)) }
     }
 
-    /** CHECK: done, or undone if it already was. */
-    fun toggleDone(target: Habit, day: LocalDate, onLogged: (Long?) -> Unit = {}) {
+    /** CHECK: done, or undone if it already was. [onDone] gets whether it's now done and an Undo action. */
+    fun toggleDone(target: Habit, day: LocalDate, onDone: (done: Boolean, undo: () -> Unit) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             val existing = dao.entryOfType(target.id, day.toEpochDay(), LogType.DONE.name)
             if (existing != null) {
                 dao.deleteOfType(target.id, day.toEpochDay(), LogType.DONE.name)
-                onLogged(null)
+                onDone(false) { viewModelScope.launch { dao.insert(existing.copy(id = 0)) } }
             } else {
-                onLogged(dao.insert(Entry(targetId = target.id, epochDay = day.toEpochDay(), type = LogType.DONE.name)))
+                val id = dao.insert(Entry(targetId = target.id, epochDay = day.toEpochDay(), type = LogType.DONE.name))
+                onDone(true) { deleteEntry(id) }
             }
         }
     }
 
-    /** BY_TIME: done at [minutes] after midnight (now, if logging today). Replaces an earlier time for that day. */
-    fun logTime(target: Habit, day: LocalDate, minutes: Int = LocalTime.now().let { it.hour * 60 + it.minute }, onLogged: (Long) -> Unit = {}) {
+    /**
+     * BY_TIME: done at [minutes] after midnight on [day], replacing an earlier time for that day. The
+     * day's target time is saved with it, so changing the target later never rewrites this day.
+     */
+    fun logTime(target: Habit, day: LocalDate, minutes: Int, onLogged: (Long) -> Unit = {}) {
         viewModelScope.launch {
-            dao.deleteOfType(target.id, day.toEpochDay(), LogType.TIME.name)
-            onLogged(dao.insert(Entry(targetId = target.id, epochDay = day.toEpochDay(), type = LogType.TIME.name, value = minutes.toDouble())))
+            val d = day.toEpochDay()
+            if (dao.entryOfType(target.id, d, LogType.TARGET.name) == null) {
+                val logs = dao.logs().filter { it.targetId == target.id && it.epochDay == d }.map { it.toLog() }
+                dao.insert(Entry(targetId = target.id, epochDay = d, type = LogType.TARGET.name, value = Goals.targetTime(target.goal(), logs, day).toDouble()))
+            }
+            dao.deleteOfType(target.id, d, LogType.TIME.name)
+            onLogged(dao.insert(Entry(targetId = target.id, epochDay = d, type = LogType.TIME.name, value = minutes.toDouble())))
         }
+    }
+
+    /** BY_TIME: a different target time just for [day] (a class moved the library to 11:00), or back to normal with null. */
+    fun setDayTarget(target: Habit, day: LocalDate, minutes: Int?) {
+        viewModelScope.launch {
+            dao.deleteOfType(target.id, day.toEpochDay(), LogType.TARGET.name)
+            if (minutes != null) dao.insert(Entry(targetId = target.id, epochDay = day.toEpochDay(), type = LogType.TARGET.name, value = minutes.toDouble()))
+        }
+    }
+
+    /** A note for the day, or none if [text] is blank. */
+    fun setNote(target: Habit, day: LocalDate, text: String) {
+        viewModelScope.launch {
+            dao.deleteOfType(target.id, day.toEpochDay(), LogType.NOTE.name)
+            val clean = text.trim().take(300)
+            if (clean.isNotEmpty()) dao.insert(Entry(targetId = target.id, epochDay = day.toEpochDay(), type = LogType.NOTE.name, note = clean))
+        }
+    }
+
+    /** Pauses from [from] to [to], both included; those days count as skipped. */
+    fun pause(target: Habit, from: LocalDate, to: LocalDate) {
+        viewModelScope.launch { dao.update(target.copy(pauseStart = from.toEpochDay(), pauseEnd = maxOf(from, to).toEpochDay())) }
+    }
+
+    /** Ends a pause: from today on it counts again; days already paused stay skipped. */
+    fun resume(target: Habit, today: LocalDate) {
+        viewModelScope.launch {
+            val t = dao.target(target.id) ?: return@launch
+            dao.update(if (t.pauseStart >= today.toEpochDay()) t.copy(pauseStart = 0, pauseEnd = 0) else t.copy(pauseEnd = today.minusDays(1).toEpochDay()))
+        }
+    }
+
+    /** Deletes everything logged before [day], for all targets. Returns how many entries went. */
+    fun clearHistoryBefore(day: LocalDate, onDone: (Int) -> Unit) {
+        viewModelScope.launch { onDone(dao.deleteLogsBefore(day.toEpochDay())) }
+    }
+
+    /** Deletes one target's history, keeping the target. */
+    fun clearHistory(target: Habit, onDone: (Int) -> Unit) {
+        viewModelScope.launch { onDone(dao.deleteLogsFor(target.id)) }
     }
 
     /** AMOUNT: adds [amount] by hand. */
@@ -142,6 +191,9 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
             listOf(LogType.DONE, LogType.TIME, LogType.AMOUNT).forEach { dao.deleteOfType(target.id, day.toEpochDay(), it.name) }
         }
     }
+
+    /** Minutes after midnight right now. */
+    fun nowMinutes(): Int = LocalTime.now().let { it.hour * 60 + it.minute }
 
     fun deleteEntry(id: Long) {
         viewModelScope.launch { dao.deleteEntry(id) }
@@ -217,12 +269,13 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
                 val m = 6 * 60 + 35 + rnd.nextInt(45)
                 if (ago % 9 == 0L) emptyList() else listOf(Entry(targetId = 0, epochDay = day(ago), type = "TIME", value = m.toDouble()))
             }
-            add(Habit(name = "At the library", emoji = "📚", kind = Kind.BY_TIME.name, timeMinutes = 9 * 60, days = 31, sortOrder = 2)) { ago ->
-                val m = 8 * 60 + 40 + rnd.nextInt(35)
+            val libraryTimes = mapOf(2 to 10 * 60, 4 to 13 * 60)
+            add(Habit(name = "At the library", emoji = "📚", kind = Kind.BY_TIME.name, timeMinutes = 9 * 60, days = 31, dayTimes = com.rachitratnammudaliar.target.domain.DayTimes.format(libraryTimes), sortOrder = 2)) { ago ->
+                val m = (libraryTimes[today.minusDays(ago).dayOfWeek.value] ?: (9 * 60)) - 20 + rnd.nextInt(35)
                 listOf(Entry(targetId = 0, epochDay = day(ago), type = "TIME", value = m.toDouble()))
             }
-            add(Habit(name = "Run", emoji = "🏃", kind = Kind.AMOUNT.name, goalValue = 5.0, unit = "km", health = HealthSource.RUN_DISTANCE.name, days = 1 or 4 or 16 or 64, sortOrder = 3)) { ago ->
-                listOf(Entry(targetId = 0, epochDay = day(ago), type = "HEALTH", value = (30 + rnd.nextInt(35)) / 10.0 + 1.0))
+            add(Habit(name = "Run", emoji = "🏃", kind = Kind.AMOUNT.name, goalValue = 5.0, unit = "km", health = HealthSource.RUN_DISTANCE.name, weeklyTimes = 3, sortOrder = 3)) { ago ->
+                if (ago % 2 == 1L) emptyList() else listOf(Entry(targetId = 0, epochDay = day(ago), type = "HEALTH", value = (30 + rnd.nextInt(35)) / 10.0 + 1.0))
             }
             add(Habit(name = "Steps", emoji = "👟", kind = Kind.AMOUNT.name, goalValue = 10_000.0, unit = "steps", step = 1000.0, health = HealthSource.STEPS.name, sortOrder = 4)) { ago ->
                 listOf(Entry(targetId = 0, epochDay = day(ago), type = "HEALTH", value = (6000 + rnd.nextInt(7000)).toDouble()))
@@ -230,8 +283,8 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
             add(Habit(name = "Drink water", emoji = "💧", kind = Kind.AMOUNT.name, goalValue = 8.0, unit = "glasses", sortOrder = 5)) { ago ->
                 List(5 + rnd.nextInt(4)) { Entry(targetId = 0, epochDay = day(ago), type = "AMOUNT", value = 1.0) }
             }
-            add(Habit(name = "Gym", emoji = "🏋️", kind = Kind.CHECK.name, days = 2 or 8 or 32, sortOrder = 6)) { ago ->
-                if (rnd.nextInt(5) == 0) emptyList() else listOf(Entry(targetId = 0, epochDay = day(ago), type = "DONE"))
+            add(Habit(name = "Gym", emoji = "🏋️", kind = Kind.CHECK.name, weeklyTimes = 3, sortOrder = 6)) { ago ->
+                if (rnd.nextInt(7) >= 3) emptyList() else listOf(Entry(targetId = 0, epochDay = day(ago), type = "DONE"))
             }
             // Today: some done, some still to do.
             val ids = dao.targets().associateBy { it.name }
@@ -239,6 +292,7 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
             ids["Steps"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "HEALTH", value = 6420.0)) }
             ids["Drink water"]?.let { t -> repeat(3) { dao.insert(Entry(targetId = t.id, epochDay = today.toEpochDay(), type = "AMOUNT", value = 1.0)) } }
             ids["Run"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "HEALTH", value = 5.4)) }
+            ids["Wake up"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "NOTE", note = "Slept early, felt great")) }
         }
     }
 }

@@ -14,6 +14,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.rachitratnammudaliar.target.domain.DayTimes
 import com.rachitratnammudaliar.target.domain.Days
 import com.rachitratnammudaliar.target.domain.Goal
 import com.rachitratnammudaliar.target.domain.HealthSource
@@ -49,6 +52,14 @@ data class Habit(
     val archived: Boolean = false,
     val notes: String = "",
     val createdAt: Long = System.currentTimeMillis(),
+    // Added in database version 2 (app 1.1.0).
+    /** BY_TIME: a different time on some weekdays, as "1=540;2=600" (see DayTimes). */
+    val dayTimes: String = "",
+    /** CHECK and AMOUNT: this many times a week on any days; 0 = on the set days. */
+    val weeklyTimes: Int = 0,
+    /** Paused from this epoch day to [pauseEnd]; 0 = not paused. */
+    val pauseStart: Long = 0,
+    val pauseEnd: Long = 0,
 )
 
 /** One thing logged for a target on a day. */
@@ -65,11 +76,20 @@ data class Entry(
     /** TIME: minutes after midnight. AMOUNT and HEALTH: the amount. DONE and SKIP: 1. */
     val value: Double = 1.0,
     val createdAt: Long = System.currentTimeMillis(),
+    // Added in database version 2 (app 1.1.0): the text of a NOTE.
+    val note: String = "",
 )
 
 fun Habit.kindValue(): Kind = Kind.fromName(kind)
 fun Habit.healthValue(): HealthSource = HealthSource.fromName(health)
-fun Habit.goal(): Goal = Goal(kindValue(), goalValue, timeMinutes, days, LocalDate.ofEpochDay(startDay), healthValue())
+fun Habit.goal(): Goal = Goal(
+    kindValue(), goalValue, timeMinutes, days, LocalDate.ofEpochDay(startDay), healthValue(),
+    dayTimes = DayTimes.parse(dayTimes),
+    weeklyTimes = weeklyTimes,
+    pauseStart = if (pauseEnd > 0) LocalDate.ofEpochDay(pauseStart) else null,
+    pauseEnd = if (pauseEnd > 0) LocalDate.ofEpochDay(pauseEnd) else null,
+)
+fun Habit.pausedOn(day: LocalDate): Boolean = pauseEnd > 0 && day.toEpochDay() in pauseStart..pauseEnd
 fun Entry.typeValue(): LogType = LogType.fromName(type)
 fun Entry.date(): LocalDate = LocalDate.ofEpochDay(epochDay)
 fun Entry.toLog(): Log = Log(typeValue(), date(), value)
@@ -112,6 +132,16 @@ interface TargetDao {
     @Query("DELETE FROM logs WHERE id = :id")
     suspend fun deleteEntry(id: Long)
 
+    /** Clears history before [day]; Samsung Health totals for those days go too. */
+    @Query("DELETE FROM logs WHERE epochDay < :day")
+    suspend fun deleteLogsBefore(day: Long): Int
+
+    @Query("DELETE FROM logs WHERE targetId = :targetId")
+    suspend fun deleteLogsFor(targetId: Long): Int
+
+    @Query("SELECT * FROM logs WHERE id = :id")
+    suspend fun entry(id: Long): Entry?
+
     @Query("DELETE FROM logs WHERE targetId = :targetId AND epochDay = :day AND type = :type")
     suspend fun deleteOfType(targetId: Long, day: Long, type: String)
 
@@ -135,7 +165,18 @@ interface TargetDao {
     }
 }
 
-@Database(entities = [Habit::class, Entry::class], version = 1, exportSchema = false)
+/** Version 1 -> 2 (app 1.0 -> 1.1.0): times per weekday, X times a week, pausing, and day notes. */
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE targets ADD COLUMN dayTimes TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE targets ADD COLUMN weeklyTimes INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE targets ADD COLUMN pauseStart INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE targets ADD COLUMN pauseEnd INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE logs ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+@Database(entities = [Habit::class, Entry::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): TargetDao
 
@@ -148,6 +189,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
+                    .addMigrations(MIGRATION_1_2)
                     .build().also { instance = it }
             }
     }

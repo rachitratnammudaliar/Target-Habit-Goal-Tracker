@@ -331,17 +331,37 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
     val scope = rememberCoroutineScope()
     val goal = t.goal()
     val logs = state.logs(t.id, day)
+    val byDay = state.logsByDay(t.id)
     val result = Goals.result(goal, logs, day, today)
-    val streak = Goals.currentStreak(goal, state.logsByDay(t.id), today)
-    val tint = if (result == Result.PENDING) MaterialTheme.colorScheme.primary else resultColor(result)
+    val streak = Goals.currentStreak(goal, byDay, today)
+    val kind = t.kindValue()
+    val target = Goals.targetTime(goal, logs, day)
+    val overdue = Goals.isOverdue(goal, logs, day, today, vm.nowMinutes())
+    val note = state.entries(t.id, day).firstOrNull { it.type == LogType.NOTE.name }?.note
+    val movedToday = logs.any { it.type == LogType.TARGET } && Goals.time(logs) == null
+    val tint = when {
+        overdue -> resultColor(Result.LATE)
+        result == Result.PENDING -> MaterialTheme.colorScheme.primary
+        else -> resultColor(result)
+    }
     var menu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
-    val kind = t.kindValue()
+    var noting by remember { mutableStateOf(false) }
+    var pausing by remember { mutableStateOf(false) }
 
     if (adding) {
         AmountDialog(t, onDismiss = { adding = false }) { amount ->
             adding = false
             vm.addAmount(t, day, amount) { id -> scope.undoSnackbar(snackbar, "Added ${Amounts.withUnit(amount, t.unit)} to ${t.name}") { vm.deleteEntry(id) } }
+        }
+    }
+    if (noting) NoteDialog(t, note.orEmpty(), onDismiss = { noting = false }) { text -> noting = false; vm.setNote(t, day, text) }
+    if (pausing) PauseDialog(t, today, onDismiss = { pausing = false }) { to -> pausing = false; vm.pause(t, today, to) }
+
+    fun logNow() {
+        val (d, m) = Goals.nightAdjust(goal, today, vm.nowMinutes(), state.logs(t.id, today.minusDays(1)))
+        vm.logTime(t, d, m) { id ->
+            scope.undoSnackbar(snackbar, if (d != today) "${t.name} logged for last night" else "${t.name} logged") { vm.deleteEntry(id) }
         }
     }
 
@@ -357,19 +377,29 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(t.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val weekCount = if (goal.weekly) Goals.timesInWeek(goal, byDay, Goals.weekStart(day), today) else 0
                 val status = when {
+                    Goals.isPaused(goal, day) -> "Paused until ${LocalDate.ofEpochDay(t.pauseEnd).format(shortDate)}"
                     result == Result.SKIPPED -> "Skipped"
-                    kind == Kind.BY_TIME && Goals.time(logs) != null -> (if (result == Result.DONE) "Done at " else "Late: ") + Times.format(Goals.time(logs)!!) + " · target ${Times.format(t.timeMinutes)}"
-                    kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit)
+                    kind == Kind.BY_TIME && Goals.time(logs) != null ->
+                        (if (result == Result.DONE) "Done at " else "Late: ") + Times.format(Goals.time(logs)!!) + " · target ${Times.format(target)}"
+                    overdue -> "Overdue · target ${Times.format(target)}"
+                    kind == Kind.BY_TIME -> "By ${Times.format(target)}" + (if (movedToday) " today" else "") + if (result == Result.MISSED) " · missed" else ""
+                    kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit) + if (goal.weekly) " · $weekCount of ${goal.weeklyTimes} this week" else ""
+                    goal.weekly -> (if (result == Result.DONE) "Done · " else "") + "$weekCount of ${goal.weeklyTimes} this week"
                     result == Result.DONE -> "Done"
-                    kind == Kind.CHECK -> if (result == Result.MISSED) "Missed" else "Not done yet"
-                    else -> Goals.goalText(goal, t.unit) + if (result == Result.MISSED) " · missed" else ""
+                    result == Result.MISSED -> "Missed"
+                    else -> "Not done yet"
                 }
                 Text(
-                    status + if (streak >= 2) "  ·  🔥 $streak" else "",
+                    status + if (streak >= 2) "  ·  🔥 $streak${if (goal.weekly) " wk" else ""}" else "",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (result == Result.PENDING || result == Result.SKIPPED) MaterialTheme.colorScheme.onSurfaceVariant else resultColor(result),
-                    fontWeight = if (result == Result.DONE) FontWeight.Medium else null,
+                    color = when {
+                        overdue -> resultColor(Result.LATE)
+                        result == Result.PENDING || result == Result.SKIPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> resultColor(result)
+                    },
+                    fontWeight = if (result == Result.DONE || overdue) FontWeight.Medium else null,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -381,30 +411,32 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
                     )
                     if (t.healthValue() != HealthSource.NONE) Text("From Samsung Health", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (note != null) Text("📝 $note", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
             if (result != Result.SKIPPED) {
                 when (kind) {
                     Kind.CHECK -> {
                         val done = result == Result.DONE
+                        val toggle = {
+                            vm.toggleDone(t, day) { nowDone, undo ->
+                                scope.undoSnackbar(snackbar, if (nowDone) "${t.name}: done ✓" else "${t.name}: unticked", undo)
+                            }
+                        }
                         if (done) {
-                            FilledIconButton(onClick = { vm.toggleDone(t, day) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = resultColor(Result.DONE))) {
+                            FilledIconButton(onClick = toggle, colors = IconButtonDefaults.filledIconButtonColors(containerColor = resultColor(Result.DONE))) {
                                 Icon(Icons.Default.Check, contentDescription = "Done. Tap to undo")
                             }
                         } else {
-                            OutlinedIconButton(onClick = { vm.toggleDone(t, day) { scope.undoSnackbar(snackbar, "${t.name}: done ✓", null) } }) {
-                                Icon(Icons.Default.Check, contentDescription = "Mark done")
-                            }
+                            OutlinedIconButton(onClick = toggle) { Icon(Icons.Default.Check, contentDescription = "Mark done") }
                         }
                     }
                     Kind.BY_TIME -> {
                         if (Goals.time(logs) == null) {
                             if (day == today) {
-                                FilledTonalButton(onClick = {
-                                    vm.logTime(t, day) { id -> scope.undoSnackbar(snackbar, "${t.name} logged", { vm.deleteEntry(id) }) }
-                                }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("✓ Now") }
+                                FilledTonalButton(onClick = { logNow() }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("✓ Now") }
                             } else {
-                                FilledTonalButton(onClick = { pickTime(context, t.timeMinutes) { vm.logTime(t, day, it) } }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Time…") }
+                                FilledTonalButton(onClick = { pickTime(context, target) { vm.logTime(t, day, it) } }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Time…") }
                             }
                         }
                     }
@@ -416,15 +448,32 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    if (kind == Kind.BY_TIME) DropdownMenuItem(text = { Text(if (Goals.time(logs) == null) "Set the time…" else "Change the time…") }, onClick = {
-                        menu = false
-                        pickTime(context, Goals.time(logs) ?: t.timeMinutes) { vm.logTime(t, day, it) }
-                    })
+                    if (kind == Kind.BY_TIME) {
+                        DropdownMenuItem(text = { Text(if (Goals.time(logs) == null) "I did it at…" else "Change the time I did it…") }, onClick = {
+                            menu = false
+                            pickTime(context, Goals.time(logs)?.let { it % (24 * 60) } ?: target) { vm.logTime(t, day, it) }
+                        })
+                        if (Goals.time(logs) == null) {
+                            DropdownMenuItem(text = { Text(if (day == today) "Change today's target time…" else "Change this day's target time…") }, onClick = {
+                                menu = false
+                                pickTime(context, target) { vm.setDayTarget(t, day, it) }
+                            })
+                            if (movedToday) DropdownMenuItem(text = { Text("Back to the usual time") }, onClick = { menu = false; vm.setDayTarget(t, day, null) })
+                        }
+                    }
                     if (kind == Kind.AMOUNT) DropdownMenuItem(text = { Text("Add an amount…") }, onClick = { menu = false; adding = true })
-                    DropdownMenuItem(text = { Text(if (result == Result.SKIPPED) "Don't skip" else "Skip this day") }, onClick = {
-                        menu = false
-                        vm.toggleSkip(t, day)
-                    })
+                    DropdownMenuItem(text = { Text(if (note == null) "Add a note…" else "Edit the note…") }, onClick = { menu = false; noting = true })
+                    if (!Goals.isPaused(goal, day)) {
+                        DropdownMenuItem(text = { Text(if (logs.any { it.type == LogType.SKIP }) "Don't skip" else "Skip this day") }, onClick = {
+                            menu = false
+                            vm.toggleSkip(t, day)
+                        })
+                    }
+                    if (Goals.isPaused(goal, today)) {
+                        DropdownMenuItem(text = { Text("Resume now") }, onClick = { menu = false; vm.resume(t, today) })
+                    } else {
+                        DropdownMenuItem(text = { Text("Pause for a while…") }, onClick = { menu = false; pausing = true })
+                    }
                     if (logs.any { it.type == LogType.DONE || it.type == LogType.TIME || it.type == LogType.AMOUNT }) {
                         DropdownMenuItem(text = { Text("Clear what I logged") }, onClick = { menu = false; vm.clearDay(t, day) })
                     }
@@ -435,6 +484,51 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
             }
         }
     }
+}
+
+@Composable
+fun NoteDialog(t: Habit, current: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var text by rememberSaveable { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${t.emoji}  Note") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.take(300) },
+                placeholder = { Text("Exam week, class at 9, felt great…") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { Button(onClick = { onSave(text) }) { Text(if (text.isBlank() && current.isNotBlank()) "Remove" else "Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Pause a target: the days in between count as skipped, so the streak is safe. */
+@Composable
+fun PauseDialog(t: Habit, today: LocalDate, onDismiss: () -> Unit, onPause: (LocalDate) -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pause ${t.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Hint("For holidays, illness or exams. Paused days don't count and don't break your streak.")
+                listOf(3L to "3 days", 7L to "1 week", 14L to "2 weeks", 30L to "1 month").forEach { (days, label) ->
+                    androidx.compose.material3.OutlinedButton(onClick = { onPause(today.plusDays(days - 1)) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("$label · until ${today.plusDays(days - 1).format(shortDate)}")
+                    }
+                }
+                androidx.compose.material3.OutlinedButton(onClick = { pickDate(context, today.plusDays(7), min = today) { onPause(it) } }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Until a date…")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -505,6 +599,27 @@ private fun ProgressScreen(state: TargetState, today: LocalDate, onOpen: (Long) 
                 }
             }
         }
+        item(key = "month") {
+            val month = remember(state, today) { Goals.month(state.active.map { it.goal() to state.logsByDay(it.id) }, today) }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(today.format(java.time.format.DateTimeFormatter.ofPattern("MMMM")) + " so far", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (month.counted == 0) "Nothing counted yet this month."
+                        else "${month.done} of ${month.counted} targets hit · ${Math.round(month.done * 100.0 / month.counted)}%",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    month.bestStreak?.let { (i, n) ->
+                        val t = state.active[i]
+                        Text("🔥 Longest streak: ${t.emoji} ${t.name}, $n ${if (t.goal().weekly) "wk" else if (n == 1) "day" else "days"}", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    month.mostImproved?.let { (i, pts) ->
+                        val t = state.active[i]
+                        Text("📈 Most improved: ${t.emoji} ${t.name}, up $pts points on last month", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
         item(key = "targets-title") { SectionLabel("Each target") }
         rates.forEach { (t, rate) ->
             item(key = "t-${t.id}") {
@@ -516,7 +631,7 @@ private fun ProgressScreen(state: TargetState, today: LocalDate, onOpen: (Long) 
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(t.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text(Goals.goalText(t.goal(), t.unit) + " · " + Days.label(t.days), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(Goals.goalText(t.goal(), t.unit) + if (t.goal().weekly) "" else " · " + Days.label(t.days), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(rate.percent?.let { "$it%" } ?: "–", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -538,6 +653,8 @@ private fun ProgressScreen(state: TargetState, today: LocalDate, onOpen: (Long) 
 private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, today: LocalDate, onBack: () -> Unit, onEdit: () -> Unit) {
     val t = state?.target(id)
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
+    var pausing by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
@@ -550,7 +667,13 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
                         IconButton(onClick = { menu = true }, enabled = t != null) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             if (t != null) {
+                                if (t.goal().let { Goals.isPaused(it, today) }) {
+                                    DropdownMenuItem(text = { Text("Resume now") }, onClick = { menu = false; vm.resume(t, today) })
+                                } else {
+                                    DropdownMenuItem(text = { Text("Pause for a while…") }, onClick = { menu = false; pausing = true })
+                                }
                                 DropdownMenuItem(text = { Text(if (t.archived) "Bring back" else "Stop tracking (keep history)") }, onClick = { menu = false; vm.setArchived(t, !t.archived) })
+                                DropdownMenuItem(text = { Text("Clear this target's history…") }, onClick = { menu = false; confirmClear = true })
                                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; confirmDelete = true })
                             }
                         }
@@ -606,8 +729,12 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
                         when (t.kindValue()) {
                             Kind.BY_TIME -> {
                                 SectionLabel("Time you logged, last 30 days")
-                                TimeChart(days.map { d -> Goals.time(byDay[d].orEmpty()).takeIf { Goals.isScheduled(goal, d) } }, labels, t.timeMinutes)
-                                Hint("Dashed line: ${Times.format(t.timeMinutes)}. Green dots were on time.")
+                                TimeChart(
+                                    days.map { d -> Goals.time(byDay[d].orEmpty()).takeIf { Goals.isScheduled(goal, d) } },
+                                    labels,
+                                    days.map { d -> Goals.targetTime(goal, byDay[d].orEmpty(), d) },
+                                )
+                                Hint("Dashed line: each day's target time. Green dots were on time.")
                             }
                             Kind.AMOUNT -> {
                                 SectionLabel("${t.unit.ifBlank { "Amount" }.replaceFirstChar { it.uppercase() }}, last 30 days")
@@ -625,22 +752,36 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
                             Kind.CHECK -> {
                                 SectionLabel("Done each week, last 12 weeks")
                                 val weeks = (11 downTo 0).map { Goals.weekStart(today).minusWeeks(it.toLong()) }
-                                val rates = weeks.map { w -> Goals.hitRate(goal, byDay, w, w.plusDays(6), today) }
-                                BarChart(
-                                    values = rates.map { it.done.toDouble() },
-                                    labels = weeks.map { it.format(shortDate) },
-                                    colors = rates.map { if (it.counted > 0 && it.done == it.counted) resultColor(Result.DONE) else MaterialTheme.colorScheme.primary },
-                                    max = maxOf(7.0, (rates.maxOfOrNull { it.counted } ?: 0).toDouble()).coerceAtMost(7.0),
-                                    labelEvery = 3,
-                                )
-                                Hint("Green: every planned day that week.")
+                                if (goal.weekly) {
+                                    val counts = weeks.map { w -> Goals.timesInWeek(goal, byDay, w, today) }
+                                    BarChart(
+                                        values = counts.map { it.toDouble() },
+                                        labels = weeks.map { it.format(shortDate) },
+                                        colors = counts.map { if (it >= goal.weeklyTimes) resultColor(Result.DONE) else MaterialTheme.colorScheme.primary },
+                                        max = 7.0,
+                                        goal = goal.weeklyTimes.toDouble(),
+                                        labelEvery = 3,
+                                    )
+                                    Hint("Dashed line: ${goal.weeklyTimes} times a week. Green: reached.")
+                                } else {
+                                    val rates = weeks.map { w -> Goals.hitRate(goal, byDay, w, w.plusDays(6), today) }
+                                    BarChart(
+                                        values = rates.map { it.done.toDouble() },
+                                        labels = weeks.map { it.format(shortDate) },
+                                        colors = rates.map { if (it.counted > 0 && it.done == it.counted) resultColor(Result.DONE) else MaterialTheme.colorScheme.primary },
+                                        max = 7.0,
+                                        labelEvery = 3,
+                                    )
+                                    Hint("Green: every planned day that week.")
+                                }
                             }
                         }
                     }
                 }
             }
             item(key = "history-title") { SectionLabel("History") }
-            val history = state.entries(t.id).filter { it.type != LogType.HEALTH.name || it.value > 0 }.take(40)
+            // The day's saved target time is shown with the time logged, not as its own row.
+            val history = state.entries(t.id).filter { (it.type != LogType.HEALTH.name || it.value > 0) && it.type != LogType.TARGET.name }.take(60)
             if (history.isEmpty()) item(key = "none") { Hint("Nothing logged yet.") }
             history.forEach { e ->
                 item(key = "e-${e.id}") {
@@ -650,7 +791,12 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
                             Text(
                                 when (type) {
                                     LogType.DONE -> "Done"
-                                    LogType.TIME -> "At ${Times.format(e.value.toInt())}" + if (e.value.toInt() <= t.timeMinutes) " ✓" else " (late)"
+                                    LogType.TIME -> {
+                                        val dayTarget = Goals.targetTime(t.goal(), state.logs(t.id, LocalDate.ofEpochDay(e.epochDay)), LocalDate.ofEpochDay(e.epochDay))
+                                        "At ${Times.format(e.value.toInt())}" + (if (e.value.toInt() <= dayTarget) " ✓" else " (late)") + " · target ${Times.format(dayTarget)}"
+                                    }
+                                    LogType.TARGET -> "Target time ${Times.format(e.value.toInt())}"
+                                    LogType.NOTE -> "📝 ${e.note}"
                                     LogType.AMOUNT -> "+ ${Amounts.withUnit(e.value, t.unit)}"
                                     LogType.HEALTH -> "Samsung Health: ${Amounts.withUnit(e.value, t.unit)}"
                                     LogType.SKIP -> "Skipped"
@@ -665,6 +811,16 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
                 }
             }
         }
+    }
+    if (pausing && t != null) PauseDialog(t, today, onDismiss = { pausing = false }) { to -> pausing = false; vm.pause(t, today, to) }
+    if (confirmClear && t != null) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Clear ${t.name}'s history?") },
+            text = { Text("Everything logged for this target is deleted, and its streaks start again. The target itself stays. Export a backup first in Settings if you might want it back.") },
+            confirmButton = { TextButton(onClick = { confirmClear = false; vm.clearHistory(t) {} }) { Text("Clear history") } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+        )
     }
     if (confirmDelete && t != null) {
         AlertDialog(

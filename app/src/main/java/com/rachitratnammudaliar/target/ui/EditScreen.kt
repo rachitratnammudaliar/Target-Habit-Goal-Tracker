@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import com.rachitratnammudaliar.target.data.Habit
 import com.rachitratnammudaliar.target.domain.Amounts
+import com.rachitratnammudaliar.target.domain.DayTimes
 import com.rachitratnammudaliar.target.domain.Days
 import com.rachitratnammudaliar.target.domain.HealthSource
 import com.rachitratnammudaliar.target.domain.Kind
@@ -75,6 +76,9 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
     var days by rememberSaveable { mutableIntStateOf(Days.ALL) }
     var health by rememberSaveable { mutableStateOf(HealthSource.NONE.name) }
     var notes by rememberSaveable { mutableStateOf("") }
+    var dayTimes by rememberSaveable { mutableStateOf("") }
+    var weekly by rememberSaveable { mutableIntStateOf(0) }
+    var start by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var showErrors by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(existing?.id) {
@@ -89,6 +93,9 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
             days = existing.days
             health = existing.health
             notes = existing.notes
+            dayTimes = existing.dayTimes
+            weekly = existing.weeklyTimes
+            start = existing.startDay
             loaded = true
         }
     }
@@ -97,7 +104,9 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
     val healthValue = HealthSource.fromName(health)
     val goalValue = Amounts.parse(goalText)
     val stepValue = if (stepText.isBlank()) (if (healthValue != HealthSource.NONE) healthValue.step else 1.0) else Amounts.parse(stepText)
-    val invalid = name.isBlank() || days == 0 || (kindValue == Kind.AMOUNT && (goalValue == null || stepValue == null))
+    val weeklyOn = weekly > 0 && kindValue != Kind.BY_TIME
+    val times = DayTimes.parse(dayTimes)
+    val invalid = name.isBlank() || (days == 0 && !weeklyOn) || (kindValue == Kind.AMOUNT && (goalValue == null || stepValue == null))
 
     fun save() {
         if (invalid) {
@@ -114,7 +123,10 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
                 goalValue = if (kindValue == Kind.AMOUNT) goalValue ?: 1.0 else base.goalValue,
                 unit = unit.trim().take(20),
                 step = stepValue ?: 1.0,
-                days = days,
+                days = if (days == 0) Days.ALL else days,
+                dayTimes = if (kindValue == Kind.BY_TIME) DayTimes.format(times.filterKeys { Days.has(days, DayOfWeek.of(it)) }) else "",
+                weeklyTimes = if (weeklyOn) weekly.coerceIn(1, 7) else 0,
+                startDay = start,
                 health = if (kindValue == Kind.AMOUNT) health else HealthSource.NONE.name,
                 notes = notes.trim().take(500),
             ),
@@ -130,6 +142,8 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
         unit = t.unit
         stepText = ""
         days = t.days
+        weekly = t.weeklyTimes
+        dayTimes = ""
         health = if (healthAvailable) t.health.name else HealthSource.NONE.name
     }
 
@@ -218,6 +232,18 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
                 Kind.CHECK -> {}
             }
 
+            if (kindValue != Kind.BY_TIME) {
+                SectionLabel("How often")
+                ChipRow(listOf(false, true), weeklyOn, { if (it) "Times a week" else "On set days" }, { weekly = if (it) (weekly.takeIf { w -> w > 0 } ?: 3) else 0 })
+            }
+            if (weeklyOn) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { weekly = (weekly - 1).coerceAtLeast(1) }, enabled = weekly > 1) { Text("−") }
+                    Text("$weekly× a week", style = MaterialTheme.typography.titleMedium)
+                    OutlinedButton(onClick = { weekly = (weekly + 1).coerceAtMost(7) }, enabled = weekly < 7) { Text("＋") }
+                }
+                Hint("Any days you like, Monday to Sunday. Good for runs or the gym when your timetable changes.")
+            } else {
             SectionLabel("Which days")
             ChipRow(listOf(Days.ALL, Days.WEEKDAYS, Days.WEEKEND), days, { Days.label(it) }, { days = it })
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -235,6 +261,28 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
             }
             if (showErrors && days == 0) Hint("Choose at least one day", error = true)
             Hint("Other days are rest days: they don't count and don't break a streak.")
+            }
+
+            if (kindValue == Kind.BY_TIME) {
+                SectionLabel("Different time on some days")
+                DayOfWeek.entries.filter { Days.has(days, it) }.forEach { d ->
+                    val own = times[d.value]
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(Days.short(d), Modifier.weight(1f))
+                        TextButton(onClick = {
+                            pickTime(context, own ?: time) { m -> dayTimes = DayTimes.format(times + (d.value to m)) }
+                        }) { Text(own?.let { "By ${Times.format(it)}" } ?: "Usual (${Times.format(time)})") }
+                        if (own != null) TextButton(onClick = { dayTimes = DayTimes.format(times - d.value) }) { Text("Reset") }
+                    }
+                }
+                Hint("E.g. library by 10:00 on Tuesday and 13:00 on Thursday. To move just today, use ⋮ → Change today's target time.")
+            }
+
+            SectionLabel("Starts on")
+            OutlinedButton(onClick = { pickDate(context, LocalDate.ofEpochDay(start)) { start = it.toEpochDay() } }, modifier = Modifier.fillMaxWidth()) {
+                Text(LocalDate.ofEpochDay(start).format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM yyyy")))
+            }
+            Hint("Days before this don't count against you.")
 
             OutlinedTextField(
                 value = notes,

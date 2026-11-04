@@ -2,6 +2,7 @@ package com.rachitratnammudaliar.target.backup
 
 import com.rachitratnammudaliar.target.data.Entry
 import com.rachitratnammudaliar.target.data.Habit
+import com.rachitratnammudaliar.target.domain.DayTimes
 import com.rachitratnammudaliar.target.domain.Days
 import com.rachitratnammudaliar.target.domain.HealthSource
 import com.rachitratnammudaliar.target.domain.Kind
@@ -15,7 +16,7 @@ import org.json.JSONObject
  */
 object Backup {
     private const val FORMAT = "target-backup"
-    private const val VERSION = 1
+    private const val VERSION = 2
 
     data class Contents(val targets: List<Habit>, val entries: List<Entry>)
 
@@ -27,13 +28,14 @@ object Backup {
                     .put("ref", h.id).put("name", h.name).put("emoji", h.emoji).put("kind", h.kind)
                     .put("goalValue", h.goalValue).put("timeMinutes", h.timeMinutes).put("unit", h.unit)
                     .put("days", h.days).put("health", h.health).put("step", h.step).put("startDay", h.startDay)
-                    .put("sortOrder", h.sortOrder).put("archived", h.archived).put("notes", h.notes).put("createdAt", h.createdAt),
+                    .put("sortOrder", h.sortOrder).put("archived", h.archived).put("notes", h.notes).put("createdAt", h.createdAt)
+                    .put("dayTimes", h.dayTimes).put("weeklyTimes", h.weeklyTimes).put("pauseStart", h.pauseStart).put("pauseEnd", h.pauseEnd),
             )
         }
         val ids = targets.map { it.id }.toSet()
         val l = JSONArray()
         entries.filter { it.targetId in ids }.forEach { e ->
-            l.put(JSONObject().put("target", e.targetId).put("epochDay", e.epochDay).put("type", e.type).put("value", e.value).put("createdAt", e.createdAt))
+            l.put(JSONObject().put("target", e.targetId).put("epochDay", e.epochDay).put("type", e.type).put("value", e.value).put("createdAt", e.createdAt).put("note", e.note))
         }
         return JSONObject().put("format", FORMAT).put("version", VERSION).put("targets", t).put("logs", l).toString(2)
     }
@@ -69,6 +71,10 @@ object Backup {
                 archived = o.optBoolean("archived", false),
                 notes = o.optString("notes").take(500),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                dayTimes = DayTimes.format(DayTimes.parse(o.optString("dayTimes"))),
+                weeklyTimes = o.optInt("weeklyTimes", 0).coerceIn(0, 7),
+                pauseStart = o.optLong("pauseStart", 0).coerceAtLeast(0),
+                pauseEnd = o.optLong("pauseEnd", 0).coerceAtLeast(0),
             )
         }
         val refs = targets.map { it.id }.toSet()
@@ -85,6 +91,7 @@ object Backup {
                 type = LogType.fromName(o.optString("type")).name,
                 value = value,
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                note = o.optString("note").take(300),
             )
         }
         return Contents(targets, entries)

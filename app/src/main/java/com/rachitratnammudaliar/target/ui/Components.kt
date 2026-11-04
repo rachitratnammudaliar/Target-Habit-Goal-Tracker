@@ -165,6 +165,14 @@ fun EmojiBadge(emoji: String, tint: Color, size: Dp = 46.dp) {
     }
 }
 
+fun pickDate(context: Context, date: java.time.LocalDate, min: java.time.LocalDate? = null, max: java.time.LocalDate? = null, onPicked: (java.time.LocalDate) -> Unit) {
+    val dialog = android.app.DatePickerDialog(context, { _, y, m, d -> onPicked(java.time.LocalDate.of(y, m + 1, d)) }, date.year, date.monthValue - 1, date.dayOfMonth)
+    val zone = java.time.ZoneId.systemDefault()
+    min?.let { dialog.datePicker.minDate = it.atStartOfDay(zone).toInstant().toEpochMilli() }
+    max?.let { dialog.datePicker.maxDate = it.atStartOfDay(zone).toInstant().toEpochMilli() }
+    dialog.show()
+}
+
 fun pickTime(context: Context, minutes: Int, onPicked: (Int) -> Unit) {
     TimePickerDialog(context, { _, h, m -> onPicked(h * 60 + m) }, minutes / 60, minutes % 60, true).show()
 }
@@ -230,10 +238,10 @@ fun BarChart(
  * line above the dashes means on time. Null means nothing logged that day.
  */
 @Composable
-fun TimeChart(minutes: List<Int?>, labels: List<String>, target: Int, height: Dp = 160.dp, labelEvery: Int = 7) {
+fun TimeChart(minutes: List<Int?>, labels: List<String>, targets: List<Int>, height: Dp = 160.dp, labelEvery: Int = 7) {
     val logged = minutes.filterNotNull()
-    val lo = (minOf(logged.minOrNull() ?: target, target) - 30).coerceAtLeast(0)
-    val hi = (maxOf(logged.maxOrNull() ?: target, target) + 30).coerceAtMost(24 * 60)
+    val lo = (minOf(logged.minOrNull() ?: Int.MAX_VALUE, targets.minOrNull() ?: 0) - 30).coerceAtLeast(0)
+    val hi = (maxOf(logged.maxOrNull() ?: 0, targets.maxOrNull() ?: 0) + 30).coerceAtMost(28 * 60)
     val line = MaterialTheme.colorScheme.primary
     val ok = resultColor(Result.DONE)
     val late = resultColor(Result.LATE)
@@ -249,8 +257,12 @@ fun TimeChart(minutes: List<Int?>, labels: List<String>, target: Int, height: Dp
                 if (minutes.isEmpty()) return@Canvas
                 fun y(m: Int) = (m - lo).toFloat() / (hi - lo).coerceAtLeast(1) * size.height
                 val step = if (minutes.size > 1) size.width / (minutes.size - 1) else 0f
-                val ty = y(target)
-                drawLine(goalColor, Offset(0f, ty), Offset(size.width, ty), strokeWidth = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f)))
+                // Each day's target, so a day with a different time shows its own line.
+                targets.forEachIndexed { i, t ->
+                    val x = i * step
+                    drawLine(goalColor, Offset((x - step / 2).coerceAtLeast(0f), y(t)), Offset((x + step / 2).coerceAtMost(size.width), y(t)),
+                        strokeWidth = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)))
+                }
                 var last: Offset? = null
                 minutes.forEachIndexed { i, m ->
                     if (m == null) {
@@ -262,7 +274,7 @@ fun TimeChart(minutes: List<Int?>, labels: List<String>, target: Int, height: Dp
                     last = p
                 }
                 minutes.forEachIndexed { i, m ->
-                    if (m != null) drawCircle(if (m <= target) ok else late, 4.dp.toPx(), Offset(i * step, y(m)))
+                    if (m != null) drawCircle(if (m <= targets.getOrElse(i) { targets.last() }) ok else late, 4.dp.toPx(), Offset(i * step, y(m)))
                 }
             }
         }

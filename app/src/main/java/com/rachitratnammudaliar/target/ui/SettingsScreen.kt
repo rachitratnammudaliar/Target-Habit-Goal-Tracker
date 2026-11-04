@@ -34,6 +34,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -54,6 +57,7 @@ fun SettingsScreen(vm: TargetViewModel, onBack: () -> Unit) {
     val connected by vm.healthConnected.collectAsStateWithLifecycle()
     val syncNote by vm.syncNote.collectAsStateWithLifecycle()
     val status = remember { vm.health.status() }
+    var clearMonths by remember { mutableStateOf<Int?>(null) }
     val permissions = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
         if (granted.containsAll(Health.PERMISSIONS)) {
             vm.syncHealth(30)
@@ -84,6 +88,27 @@ fun SettingsScreen(vm: TargetViewModel, onBack: () -> Unit) {
     fun open(pkg: String) {
         val launch = context.packageManager.getLaunchIntentForPackage(pkg)
         if (launch != null) context.startActivity(launch) else scope.launch { snackbar.showSnackbar("That app isn't installed on this phone") }
+    }
+
+    clearMonths?.let { months ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { clearMonths = null },
+            title = { Text(if (months == 0) "Clear all history?" else "Clear history older than $months months?") },
+            text = {
+                Text(
+                    if (months == 0) "Everything you've logged is deleted, including today. Your targets stay. This can't be undone."
+                    else "Everything logged before ${LocalDate.now().minusMonths(months.toLong()).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))} is deleted. Your targets stay. This can't be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clearMonths = null
+                    val before = if (months == 0) LocalDate.now().plusDays(2) else LocalDate.now().minusMonths(months.toLong())
+                    vm.clearHistoryBefore(before) { n -> scope.launch { snackbar.showSnackbar(if (n == 0) "Nothing that old to clear" else "Cleared $n entries") } }
+                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { clearMonths = null }) { Text("Cancel") } },
+        )
     }
 
     Scaffold(
@@ -145,6 +170,12 @@ fun SettingsScreen(vm: TargetViewModel, onBack: () -> Unit) {
                 FilledTonalButton(onClick = { exporter.launch("target-backup-${LocalDate.now()}.json") }) { Text("Export") }
                 OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Import") }
             }
+
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            SectionLabel("Clear old history")
+            Text("Delete what you logged before a date. Your targets stay; streaks and charts only use what's left. Export a backup first if you might want it back.", style = MaterialTheme.typography.bodyMedium)
+            ChipRow(listOf(3, 6, 12, 0), null, { if (it == 0) "Everything" else "Older than $it months" }, { clearMonths = it })
+            Hint("To clear one target only: open it → ⋮ → Clear this target's history.")
 
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
             SectionLabel("Privacy")
