@@ -57,6 +57,14 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<TargetState?> = combine(dao.observeTargets(), dao.observeLogs()) { t, l -> TargetState(t, l) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    init {
+        // Keep the home-screen widget in step with the app.
+        viewModelScope.launch {
+            combine(dao.observeTargets(), dao.observeLogs()) { _, _ -> }
+                .collect { com.rachitratnammudaliar.target.widget.TodayWidget.refresh(app) }
+        }
+    }
+
     /** "Synced 10:42", an error, or "" before the first sync. */
     private val _syncNote = MutableStateFlow("")
     val syncNote: StateFlow<String> = _syncNote.asStateFlow()

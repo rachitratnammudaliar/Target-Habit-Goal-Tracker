@@ -17,11 +17,20 @@ struct Habit: Identifiable, Equatable {
     var archived: Bool = false
     var notes: String = ""
     var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    /// "1=540;2=600": a different time on some weekdays.
+    var dayTimes: String = ""
+    var weeklyTimes: Int = 0
+    /// Epoch days; pauseEnd 0 = not paused.
+    var pauseStart: Int = 0
+    var pauseEnd: Int = 0
 
     var kindValue: Kind { Kind.from(kind) }
     var goal: Goal {
-        Goal(kind: kindValue, goalValue: goalValue, timeMinutes: timeMinutes, days: days, startDay: Day(epochDay: startDay), health: HealthSource.from(health))
+        Goal(kind: kindValue, goalValue: goalValue, timeMinutes: timeMinutes, days: days, startDay: Day(epochDay: startDay), health: HealthSource.from(health),
+             dayTimes: DayTimes.parse(dayTimes), weeklyTimes: weeklyTimes,
+             pauseStart: pauseEnd > 0 ? Day(epochDay: pauseStart) : nil, pauseEnd: pauseEnd > 0 ? Day(epochDay: pauseEnd) : nil)
     }
+    func paused(on day: Day) -> Bool { pauseEnd > 0 && (pauseStart...pauseEnd).contains(day.epochDay) }
 }
 
 struct Entry: Identifiable, Equatable {
@@ -31,6 +40,7 @@ struct Entry: Identifiable, Equatable {
     var type: String
     var value: Double = 1
     var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    var note: String = ""
 
     var typeValue: LogType { LogType.from(type) }
     var log: Log { Log(type: typeValue, date: Day(epochDay: epochDay), value: value) }
@@ -50,12 +60,13 @@ enum Backup {
         let t: [[String: Any]] = targets.map { h in
             ["ref": h.id, "name": h.name, "emoji": h.emoji, "kind": h.kind, "goalValue": h.goalValue, "timeMinutes": h.timeMinutes,
              "unit": h.unit, "days": h.days, "health": h.health, "step": h.step, "startDay": h.startDay, "sortOrder": h.sortOrder,
-             "archived": h.archived, "notes": h.notes, "createdAt": h.createdAt]
+             "archived": h.archived, "notes": h.notes, "createdAt": h.createdAt,
+             "dayTimes": h.dayTimes, "weeklyTimes": h.weeklyTimes, "pauseStart": h.pauseStart, "pauseEnd": h.pauseEnd]
         }
         let l: [[String: Any]] = entries.filter { ids.contains($0.targetId) }.map { e in
-            ["target": e.targetId, "epochDay": e.epochDay, "type": e.type, "value": e.value, "createdAt": e.createdAt]
+            ["target": e.targetId, "epochDay": e.epochDay, "type": e.type, "value": e.value, "createdAt": e.createdAt, "note": e.note]
         }
-        let root: [String: Any] = ["format": format, "version": 1, "targets": t, "logs": l]
+        let root: [String: Any] = ["format": format, "version": 2, "targets": t, "logs": l]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -97,7 +108,11 @@ enum Backup {
                 sortOrder: number(o, "sortOrder")?.intValue ?? i,
                 archived: (o["archived"] as? Bool) ?? false,
                 notes: String(string(o, "notes").prefix(500)),
-                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
+                dayTimes: DayTimes.format(DayTimes.parse(string(o, "dayTimes"))),
+                weeklyTimes: max(0, min(7, number(o, "weeklyTimes")?.intValue ?? 0)),
+                pauseStart: max(0, number(o, "pauseStart")?.intValue ?? 0),
+                pauseEnd: max(0, number(o, "pauseEnd")?.intValue ?? 0)
             ))
         }
         let refs = Set(targets.map(\.id))
@@ -107,7 +122,8 @@ enum Backup {
                   let day = number(o, "epochDay")?.intValue,
                   let value = number(o, "value")?.doubleValue, !value.isNaN, value >= 0 else { continue }
             entries.append(Entry(targetId: ref, epochDay: day, type: LogType.from(string(o, "type")).rawValue, value: value,
-                                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)))
+                                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
+                                 note: String(string(o, "note").prefix(300))))
         }
         return (targets, entries)
     }
@@ -219,23 +235,99 @@ final class Store: ObservableObject {
         entries.removeAll { $0.targetId == targetId && $0.epochDay == day.epochDay && $0.type == type.rawValue }
     }
 
-    /// Done, or undone if it already was. Returns true if it's now done.
+    /// Done, or undone if it already was. Returns true if it's now done, and the entries removed (for Undo).
     @discardableResult
-    func toggleDone(_ t: Habit, _ day: Day) -> Bool {
-        if entries.contains(where: { $0.targetId == t.id && $0.epochDay == day.epochDay && $0.type == LogType.DONE.rawValue }) {
+    func toggleDone(_ t: Habit, _ day: Day) -> (done: Bool, removed: [Entry]) {
+        let existing = entries.filter { $0.targetId == t.id && $0.epochDay == day.epochDay && $0.type == LogType.DONE.rawValue }
+        if !existing.isEmpty {
             removeAll(t.id, day, .DONE)
             persist()
-            return false
+            return (false, existing)
         }
         add(t.id, day, .DONE)
-        return true
+        return (true, [])
     }
 
-    /// Done at [minutes] after midnight; replaces an earlier time for that day.
+    /// Puts back entries removed by mistake.
+    func restore(_ removed: [Entry]) {
+        for e in removed {
+            var copy = e
+            copy.id = nextEntryId
+            nextEntryId += 1
+            entries.append(copy)
+        }
+        persist()
+    }
+
+    /// Done at [minutes] after midnight; replaces an earlier time for that day. The day's target
+    /// time is saved with it, so changing the target later never rewrites this day.
     @discardableResult
     func logTime(_ t: Habit, _ day: Day, _ minutes: Int) -> Int64 {
+        if !entries.contains(where: { $0.targetId == t.id && $0.epochDay == day.epochDay && $0.type == LogType.TARGET.rawValue }) {
+            entries.append(Entry(id: nextEntryId, targetId: t.id, epochDay: day.epochDay, type: LogType.TARGET.rawValue,
+                                 value: Double(Goals.targetTime(t.goal, logs(t.id, day), day))))
+            nextEntryId += 1
+        }
         removeAll(t.id, day, .TIME)
         return add(t.id, day, .TIME, Double(minutes))
+    }
+
+    /// A different target time just for [day], or back to normal with nil.
+    func setDayTarget(_ t: Habit, _ day: Day, _ minutes: Int?) {
+        removeAll(t.id, day, .TARGET)
+        if let m = minutes { add(t.id, day, .TARGET, Double(m)) } else { persist() }
+    }
+
+    func note(_ id: Int64, _ day: Day) -> String {
+        entries.last { $0.targetId == id && $0.epochDay == day.epochDay && $0.type == LogType.NOTE.rawValue }?.note ?? ""
+    }
+
+    func setNote(_ t: Habit, _ day: Day, _ text: String) {
+        removeAll(t.id, day, .NOTE)
+        let clean = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
+        if !clean.isEmpty {
+            entries.append(Entry(id: nextEntryId, targetId: t.id, epochDay: day.epochDay, type: LogType.NOTE.rawValue, note: clean))
+            nextEntryId += 1
+        }
+        persist()
+    }
+
+    /// Paused from [from] to [to], both included: those days count as skipped.
+    func pause(_ t: Habit, from: Day, to: Day) {
+        guard var h = target(t.id) else { return }
+        h.pauseStart = from.epochDay
+        h.pauseEnd = max(from, to).epochDay
+        save(h)
+    }
+
+    /// Counts again from today; days already paused stay skipped.
+    func resume(_ t: Habit, today: Day) {
+        guard var h = target(t.id) else { return }
+        if h.pauseStart >= today.epochDay {
+            h.pauseStart = 0
+            h.pauseEnd = 0
+        } else {
+            h.pauseEnd = today.epochDay - 1
+        }
+        save(h)
+    }
+
+    /// Deletes everything logged before [day]. Returns how many entries went.
+    @discardableResult
+    func clearHistory(before day: Day) -> Int {
+        let n = entries.filter { $0.epochDay < day.epochDay }.count
+        entries.removeAll { $0.epochDay < day.epochDay }
+        persist()
+        return n
+    }
+
+    /// Deletes one target's history and keeps the target.
+    @discardableResult
+    func clearHistory(_ id: Int64) -> Int {
+        let n = entries.filter { $0.targetId == id }.count
+        entries.removeAll { $0.targetId == id }
+        persist()
+        return n
     }
 
     @discardableResult

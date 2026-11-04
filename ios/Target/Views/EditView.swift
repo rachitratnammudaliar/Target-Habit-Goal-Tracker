@@ -15,6 +15,11 @@ struct EditView: View {
     @State private var stepText: String
     @State private var days: Int
     @State private var notes: String
+    @State private var dayTimes: [Int: Int]
+    @State private var weekly: Int
+    @State private var start: Date
+    @State private var editingDay: Int?
+    @State private var dayTime = Date()
     @State private var showErrors = false
 
     init(existing: Habit?) {
@@ -29,7 +34,12 @@ struct EditView: View {
         _stepText = State(initialValue: existing.map { Amounts.format($0.step) } ?? "")
         _days = State(initialValue: existing?.days ?? Days.all)
         _notes = State(initialValue: existing?.notes ?? "")
+        _dayTimes = State(initialValue: DayTimes.parse(existing?.dayTimes ?? ""))
+        _weekly = State(initialValue: existing?.weeklyTimes ?? 0)
+        _start = State(initialValue: Day(epochDay: existing?.startDay ?? Day.today().epochDay).localDate)
     }
+
+    private var weeklyOn: Bool { weekly > 0 && kind != .BY_TIME }
 
     private var minutes: Int {
         let c = Calendar.current.dateComponents([.hour, .minute], from: time)
@@ -38,7 +48,7 @@ struct EditView: View {
     private var goalValue: Double? { Amounts.parse(goalText) }
     private var stepValue: Double? { stepText.trimmingCharacters(in: .whitespaces).isEmpty ? 1 : Amounts.parse(stepText) }
     private var invalid: Bool {
-        name.trimmingCharacters(in: .whitespaces).isEmpty || days == 0 || (kind == .AMOUNT && (goalValue == nil || stepValue == nil))
+        name.trimmingCharacters(in: .whitespaces).isEmpty || (days == 0 && !weeklyOn) || (kind == .AMOUNT && (goalValue == nil || stepValue == nil))
     }
 
     private func use(_ t: Template) {
@@ -50,6 +60,8 @@ struct EditView: View {
         unit = t.unit
         stepText = ""
         days = t.days
+        weekly = t.weeklyTimes
+        dayTimes = [:]
     }
 
     private func save() {
@@ -65,7 +77,10 @@ struct EditView: View {
         if kind == .AMOUNT { t.goalValue = goalValue ?? 1 }
         t.unit = String(unit.trimmingCharacters(in: .whitespaces).prefix(20))
         t.step = stepValue ?? 1
-        t.days = days
+        t.days = days == 0 ? Days.all : days
+        t.dayTimes = kind == .BY_TIME ? DayTimes.format(dayTimes.filter { Days.has(t.days, $0.key - 1) }) : ""
+        t.weeklyTimes = weeklyOn ? min(7, max(1, weekly)) : 0
+        t.startDay = Day(localDate: start).epochDay
         t.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         store.save(t)
         dismiss()
@@ -121,6 +136,19 @@ struct EditView: View {
                 } footer: {
                     Text(kind.description + (kind == .AMOUNT ? ". On iPhone you add amounts yourself; Samsung Health filling is on Android." : "."))
                 }
+                if kind != .BY_TIME {
+                    Section {
+                        Picker("How often", selection: Binding(get: { weeklyOn }, set: { weekly = $0 ? (weekly > 0 ? weekly : 3) : 0 })) {
+                            Text("On set days").tag(false)
+                            Text("Times a week").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        if weeklyOn { Stepper("\(weekly)× a week", value: $weekly, in: 1...7) }
+                    } footer: {
+                        if weeklyOn { Text("Any days you like, Monday to Sunday. Good for runs or the gym when your timetable changes.") }
+                    }
+                }
+                if !weeklyOn {
                 Section {
                     Picker("Days", selection: $days) {
                         Text("Every day").tag(Days.all)
@@ -144,7 +172,44 @@ struct EditView: View {
                 } footer: {
                     Text("Other days are rest days: they don't count and don't break a streak.")
                 }
+                }
+                if kind == .BY_TIME {
+                    Section {
+                        ForEach((0..<7).filter { Days.has(days, $0) }, id: \.self) { i in
+                            HStack {
+                                Text(Days.names[i])
+                                Spacer()
+                                Button(dayTimes[i + 1].map { "By \(Times.format($0))" } ?? "Usual (\(Times.format(minutes)))") {
+                                    let m = dayTimes[i + 1] ?? minutes
+                                    dayTime = Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+                                    editingDay = i
+                                }
+                                .buttonStyle(.borderless)
+                                if dayTimes[i + 1] != nil {
+                                    Button("Reset") { dayTimes[i + 1] = nil }.buttonStyle(.borderless).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Different time on some days")
+                    } footer: {
+                        Text("E.g. library by 10:00 on Tuesday and 13:00 on Thursday. To move just today, use ⋯ → Change today's target time.")
+                    }
+                }
+                Section {
+                    DatePicker("Starts on", selection: $start, displayedComponents: .date)
+                } footer: {
+                    Text("Days before this don't count against you.")
+                }
                 Section { TextField("Notes (optional)", text: $notes, axis: .vertical).lineLimit(2...5) }
+            }
+            .sheet(isPresented: Binding(get: { editingDay != nil }, set: { if !$0 { editingDay = nil } })) {
+                if let i = editingDay {
+                    TimeSheet(title: Days.names[i], hint: "The target time on \(Days.names[i]) only.", time: $dayTime) { m in
+                        dayTimes[i + 1] = m
+                        editingDay = nil
+                    } onCancel: { editingDay = nil }
+                }
             }
             .navigationTitle(existing == nil ? "New target" : "Edit target")
             .navigationBarTitleDisplayMode(.inline)
@@ -162,6 +227,7 @@ struct SettingsView: View {
     @State private var importing = false
     @State private var exportURL: URL?
     @State private var message: String?
+    @State private var clearing: Int?
 
     var body: some View {
         NavigationStack {
@@ -172,6 +238,15 @@ struct SettingsView: View {
                     Button { importing = true } label: { Label("Import backup", systemImage: "square.and.arrow.down") }
                     if let message = message { Text(message).font(.footnote).foregroundColor(.secondary) }
                 } header: { Text("Backup") }
+                Section {
+                    ForEach([3, 6, 12, 0], id: \.self) { months in
+                        Button(months == 0 ? "Everything" : "Older than \(months) months", role: .destructive) { clearing = months }
+                    }
+                } header: {
+                    Text("Clear old history")
+                } footer: {
+                    Text("Deletes what you logged before that date. Your targets stay. Export a backup first if you might want it back. To clear one target only, open it and use ⋯.")
+                }
                 Section("Samsung Health") {
                     Text("On Android, Target reads steps, workouts, distance and calories from Samsung Health so targets tick themselves. On iPhone you log them with a tap.")
                 }
@@ -187,6 +262,20 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { exportURL = try? store.exportFile() }
+            .confirmationDialog(clearing == 0 ? "Clear all history?" : "Clear history older than \(clearing ?? 0) months?",
+                                isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }), titleVisibility: .visible) {
+                Button("Clear", role: .destructive) {
+                    let today = Day.today()
+                    let before = clearing == 0 ? today.plusDays(2) : today.plusMonths(-(clearing ?? 0))
+                    let n = store.clearHistory(before: before)
+                    message = n == 0 ? "Nothing that old to clear." : "Cleared \(n) entries."
+                    exportURL = try? store.exportFile()
+                    clearing = nil
+                }
+                Button("Cancel", role: .cancel) { clearing = nil }
+            } message: {
+                Text("This can't be undone. Your targets stay.")
+            }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.json, .plainText, .data]) { result in
                 switch result {
                 case .success(let url):

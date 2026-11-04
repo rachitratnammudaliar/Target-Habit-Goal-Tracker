@@ -1,3 +1,7 @@
 <resources>
     <color name="ic_launcher_background">#4F46E5</color>
+    <color name="widget_bg">#F7F7FB</color>
+    <color name="widget_text">#1B1B21</color>
+    <color name="widget_subtle">#5F5E6B</color>
+    <color name="widget_tick_text">#FFFFFF</color>
 </resources>
