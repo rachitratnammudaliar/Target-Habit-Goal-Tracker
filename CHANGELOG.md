@@ -1,9 +1,29 @@
 # Changelog
 
+## 1.1.0
+
+Targets that fit a real timetable.
+
+- **Any time:** a "done or not" target has no time at all. Tick it whenever you do it
+- **Times a week:** run 3 times a week, gym 4 times a week, on whichever days suit you. Not going on a given day is never "missed"; the streak counts weeks
+- **A different time on some days:** library by 10:00 on Tuesday and 13:00 on Thursday
+- **Change just today's time:** a class moved? ⋮ → Change today's target time. Your usual time stays
+- **Pause** a target for 3 days, a week, a month or until a date (holidays, exams, ill). Paused days never break a streak
+- **Day notes:** "exam week", "new route", shown on Today and in the history
+- **Clear old history:** older than 3, 6 or 12 months, everything, or one target's history
+- **Monthly report** on Progress: targets hit this month, longest streak, most improved
+- **Android widget:** today's targets on the home screen with a one-tap ✓
+- **Fixed:** changing a target's time no longer rewrites past days; each day keeps the time it had
+- **Fixed:** "In bed by 23:00" logged at 00:30 now counts for last night, as late, not for the new day
+- **Fixed:** a missed time target now shows **Overdue** once its time has passed
+- **Fixed:** you can set the day a target starts, so earlier days don't count against you
+- **Fixed:** unticking a "done or not" target has Undo too
+
 ## 1.0.1
 
 - **Fixed:** a "done or not" target like Gym said "Done" before you'd ticked it. It now says "Not done yet"
 - Chart dates are readable, and the day arrows on Today are bigger
+
 ## 1.0.0
 
 The first version of Target, for Android and iPhone.

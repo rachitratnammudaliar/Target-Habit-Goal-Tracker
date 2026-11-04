@@ -67,7 +67,7 @@ Target only **reads**; it never writes to Samsung Health or sends anything anywh
 **Three kinds of target**
 | Kind | For | Logged by |
 |---|---|---|
-| **Done or not** | Gym, meditate | Tapping ✓ |
+| **Done or not** | Gym, meditate: any time of day | Tapping ✓ |
 | **By a time** | Wake up by 7:00, at the library by 9:00 | Tapping **✓ Now**, which saves the time; on time or earlier is a hit, after is late |
 | **An amount** | Run 5 km, 10,000 steps, 8 glasses of water, 20 pages | **＋** adds your usual amount, or Samsung Health fills it in |
 
@@ -75,11 +75,17 @@ Target only **reads**; it never writes to Samsung Health or sends anything anywh
 - A ring with how many of today's targets you've hit, and your longest streak
 - One tap to log, with Undo; ‹ › to fill in earlier days
 - **Which days:** every day, weekdays, weekends or any days you choose. Other days are rest days that never break a streak
-- **Skip** a day when you're ill or travelling, so it doesn't count against you
+- **Times a week:** run 3 times a week on whichever days suit you; the streak counts weeks
+- **A different time on some days** (library by 10:00 on Tuesday, 13:00 on Thursday), or change **just today's** time when a class moves
+- **Overdue** once a time target's time has passed; "in bed by 23:00" logged after midnight counts for the night before
+- **Skip** a day, or **pause** a target for a holiday or exams, so it doesn't count against you
+- **Notes** for a day: "exam week", "new route"
+- **Android widget:** today's targets on the home screen with a one-tap ✓
 
 **Progress**
 - Hit rate for the last 7, 30 or 90 days, with a bar for every day (green when every target was hit)
 - A calendar heatmap for each target: done, late or not quite, missed, skipped, rest day
+- **This month:** targets hit, longest streak, most improved
 
 **Each target**
 - Current and best streak, 30-day hit rate, times hit
@@ -87,7 +93,7 @@ Target only **reads**; it never writes to Samsung Health or sends anything anywh
 - A chart of your **wake-up times** against the target time, your **daily km or steps** against the goal, or **times done each week**
 - Full history, and Stop tracking to keep the history without the target
 
-**Backup:** export to a file and import it on a new phone, Android or iPhone.
+**Backup:** export to a file and import it on a new phone, Android or iPhone. **Clear old history** older than 3, 6 or 12 months, or one target's history.
 
 ## Privacy
 
