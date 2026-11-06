@@ -307,19 +307,18 @@ struct SummarySection: View {
         return f.string(from: d.date)
     }
 
-    var body: some View {
-        let from: Day, to: Day, prevFrom: Day, prevTo: Day
+    private func period() -> (from: Day, to: Day, prevFrom: Day, prevTo: Day) {
         if monthly {
-            from = today.firstOfMonth.plusMonths(-back)
-            to = from.plusMonths(1).plusDays(-1)
-            prevFrom = from.plusMonths(-1)
-            prevTo = from.plusDays(-1)
-        } else {
-            from = Goals.weekStart(today).plusDays(-7 * back)
-            to = from.plusDays(6)
-            prevFrom = from.plusDays(-7)
-            prevTo = from.plusDays(-1)
+            let from = today.firstOfMonth.plusMonths(-back)
+            return (from, from.plusMonths(1).plusDays(-1), from.plusMonths(-1), from.plusDays(-1))
         }
+        let from = Goals.weekStart(today).plusDays(-7 * back)
+        return (from, from.plusDays(6), from.plusDays(-7), from.plusDays(-1))
+    }
+
+    var body: some View {
+        let p = period()
+        let from = p.from, to = p.to, prevFrom = p.prevFrom, prevTo = p.prevTo
         let title = monthly ? Self.monthTitle(from) : back == 0 ? "This week" : back == 1 ? "Last week" : "\(from.format(.short)) – \(to.format(.short))"
         let summary = Goals.summary(store.goals, units: store.active.map(\.unit), from: from, to: to, prevFrom: prevFrom, prevTo: prevTo, today: today)
         let lines = Self.lines(summary, store.active)
