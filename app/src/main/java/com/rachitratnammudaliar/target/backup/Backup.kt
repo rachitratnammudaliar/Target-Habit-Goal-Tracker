@@ -29,7 +29,7 @@ object Backup {
                     .put("goalValue", h.goalValue).put("timeMinutes", h.timeMinutes).put("unit", h.unit)
                     .put("days", h.days).put("health", h.health).put("step", h.step).put("startDay", h.startDay)
                     .put("sortOrder", h.sortOrder).put("archived", h.archived).put("notes", h.notes).put("createdAt", h.createdAt)
-                    .put("dayTimes", h.dayTimes).put("weeklyTimes", h.weeklyTimes).put("pauseStart", h.pauseStart).put("pauseEnd", h.pauseEnd),
+                    .put("dayTimes", h.dayTimes).put("weeklyTimes", h.weeklyTimes).put("pauseStart", h.pauseStart).put("pauseEnd", h.pauseEnd).put("weekTotal", h.weekTotal),
             )
         }
         val ids = targets.map { it.id }.toSet()
@@ -75,6 +75,7 @@ object Backup {
                 weeklyTimes = o.optInt("weeklyTimes", 0).coerceIn(0, 7),
                 pauseStart = o.optLong("pauseStart", 0).coerceAtLeast(0),
                 pauseEnd = o.optLong("pauseEnd", 0).coerceAtLeast(0),
+                weekTotal = o.optBoolean("weekTotal", false),
             )
         }
         val refs = targets.map { it.id }.toSet()

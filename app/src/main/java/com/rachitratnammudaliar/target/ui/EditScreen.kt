@@ -56,7 +56,7 @@ import com.rachitratnammudaliar.target.health.Health
 import java.time.DayOfWeek
 import java.time.LocalDate
 
-private val UNITS = listOf("km", "min", "steps", "kcal", "pages", "glasses", "times")
+private val UNITS = listOf("km", "h", "min", "steps", "kcal", "pages", "glasses", "times")
 
 @Composable
 fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (savedId: Long) -> Unit) {
@@ -78,6 +78,7 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
     var notes by rememberSaveable { mutableStateOf("") }
     var dayTimes by rememberSaveable { mutableStateOf("") }
     var weekly by rememberSaveable { mutableIntStateOf(0) }
+    var weekTotal by rememberSaveable { mutableStateOf(false) }
     var start by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var showErrors by rememberSaveable { mutableStateOf(false) }
 
@@ -95,6 +96,7 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
             notes = existing.notes
             dayTimes = existing.dayTimes
             weekly = existing.weeklyTimes
+            weekTotal = existing.weekTotal
             start = existing.startDay
             loaded = true
         }
@@ -103,10 +105,12 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
     val kindValue = Kind.fromName(kind)
     val healthValue = HealthSource.fromName(health)
     val goalValue = Amounts.parse(goalText)
-    val stepValue = if (stepText.isBlank()) (if (healthValue != HealthSource.NONE) healthValue.step else 1.0) else Amounts.parse(stepText)
-    val weeklyOn = weekly > 0 && kindValue != Kind.BY_TIME
+    val defaultStep = if (healthValue != HealthSource.NONE) healthValue.step else if (unit.trim() == "h") 0.5 else 1.0
+    val stepValue = if (stepText.isBlank()) defaultStep else Amounts.parse(stepText)
+    val totalOn = weekTotal && kindValue == Kind.AMOUNT
+    val weeklyOn = weekly > 0 && kindValue != Kind.BY_TIME && !totalOn
     val times = DayTimes.parse(dayTimes)
-    val invalid = name.isBlank() || (days == 0 && !weeklyOn) || (kindValue == Kind.AMOUNT && (goalValue == null || stepValue == null))
+    val invalid = name.isBlank() || (days == 0 && !weeklyOn && !totalOn) || (kindValue == Kind.AMOUNT && (goalValue == null || stepValue == null))
 
     fun save() {
         if (invalid) {
@@ -126,6 +130,7 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
                 days = if (days == 0) Days.ALL else days,
                 dayTimes = if (kindValue == Kind.BY_TIME) DayTimes.format(times.filterKeys { Days.has(days, DayOfWeek.of(it)) }) else "",
                 weeklyTimes = if (weeklyOn) weekly.coerceIn(1, 7) else 0,
+                weekTotal = totalOn,
                 startDay = start,
                 health = if (kindValue == Kind.AMOUNT) health else HealthSource.NONE.name,
                 notes = notes.trim().take(500),
@@ -143,6 +148,7 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
         stepText = ""
         days = t.days
         weekly = t.weeklyTimes
+        weekTotal = t.weekTotal
         dayTimes = ""
         health = if (healthAvailable) t.health.name else HealthSource.NONE.name
     }
@@ -227,16 +233,28 @@ fun EditScreen(vm: TargetViewModel, state: TargetState?, id: Long, onDone: (save
                     }
                     if (healthValue == HealthSource.NONE) ChipRow(UNITS, unit, { it }, { unit = it })
                     NumberField(stepText, { stepText = it }, "Each ＋ adds", isError = showErrors && stepValue == null, error = "A number above 0")
-                    Hint("Leave it empty for ${Amounts.withUnit(if (healthValue != HealthSource.NONE) healthValue.step else 1.0, unit)}.")
+                    Hint("Leave it empty for ${Amounts.withUnit(defaultStep, unit)}.")
+                    if (healthValue == HealthSource.MOVEMENT) Hint("Counts walking, running and steps together: 10 km is 13,500 steps, and whichever you're further along on is used.")
+                    if (!totalOn) Hint("60% is partly achieved, 80% satisfied, 100% done and 130% overachieved.")
                 }
                 Kind.CHECK -> {}
             }
 
             if (kindValue != Kind.BY_TIME) {
                 SectionLabel("How often")
-                ChipRow(listOf(false, true), weeklyOn, { if (it) "Times a week" else "On set days" }, { weekly = if (it) (weekly.takeIf { w -> w > 0 } ?: 3) else 0 })
+                val mode = if (totalOn) 2 else if (weeklyOn) 1 else 0
+                ChipRow(
+                    if (kindValue == Kind.AMOUNT) listOf(0, 1, 2) else listOf(0, 1), mode,
+                    { when (it) { 2 -> "Total for the week"; 1 -> "Times a week"; else -> "On set days" } },
+                    { m ->
+                        weekTotal = m == 2
+                        weekly = if (m == 1) (weekly.takeIf { w -> w > 0 } ?: 3) else 0
+                    },
+                )
             }
-            if (weeklyOn) {
+            if (totalOn) {
+                Hint("The target amount is the total for the whole week, in any amounts on any days. Good for self-study: 15 h a week.")
+            } else if (weeklyOn) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = { weekly = (weekly - 1).coerceAtLeast(1) }, enabled = weekly > 1) { Text("−") }
                     Text("$weekly× a week", style = MaterialTheme.typography.titleMedium)

@@ -14,6 +14,7 @@ import com.rachitratnammudaliar.target.data.AppDatabase
 import com.rachitratnammudaliar.target.data.Entry
 import com.rachitratnammudaliar.target.data.goal
 import com.rachitratnammudaliar.target.data.toLog
+import com.rachitratnammudaliar.target.domain.Amounts
 import com.rachitratnammudaliar.target.domain.Goals
 import com.rachitratnammudaliar.target.domain.Kind
 import com.rachitratnammudaliar.target.domain.LogType
@@ -108,7 +109,7 @@ class TodayWidget : AppWidgetProvider() {
             val today = LocalDate.now()
             val now = nowMinutes()
             val due = state.active.filter { val g = it.goal(); Goals.isScheduled(g, today) && !Goals.isPaused(g, today) }
-            val done = due.count { t -> Goals.result(t.goal(), state.logs(t.id, today), today, today) == Result.DONE }
+            val done = due.count { t -> Goals.result(t.goal(), state.logs(t.id, today), today, today) .hit }
 
             val views = RemoteViews(context.packageName, R.layout.widget_today)
             views.setTextViewText(R.id.widget_count, if (due.isEmpty()) "" else "$done of ${due.size}")
@@ -117,7 +118,7 @@ class TodayWidget : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_empty, if (due.isEmpty()) View.VISIBLE else View.GONE)
 
             // Still to do first, then what's done.
-            val ordered = due.sortedBy { t -> Goals.result(t.goal(), state.logs(t.id, today), today, today) == Result.DONE }
+            val ordered = due.sortedBy { t -> Goals.result(t.goal(), state.logs(t.id, today), today, today) .hit }
             ordered.take(MAX_ROWS).forEach { t ->
                 val goal = t.goal()
                 val logs = state.logs(t.id, today)
@@ -125,6 +126,7 @@ class TodayWidget : AppWidgetProvider() {
                 val row = RemoteViews(context.packageName, R.layout.widget_row)
                 row.setTextViewText(R.id.row_title, "${t.emoji}  ${t.name}")
                 val status = when {
+                    goal.weekTotal -> "${Amounts.format(Goals.weekAmount(goal, state.logsByDay(t.id), Goals.weekStart(today), today))} / ${Amounts.withUnit(goal.goalValue, t.unit)} this week"
                     goal.weekly -> {
                         val n = Goals.timesInWeek(goal, state.logsByDay(t.id), Goals.weekStart(today), today)
                         "$n of ${goal.weeklyTimes} this week" + if (goal.kind == Kind.AMOUNT) " · " + Goals.progressText(goal, logs, t.unit) else ""
@@ -132,10 +134,10 @@ class TodayWidget : AppWidgetProvider() {
                     goal.kind == Kind.BY_TIME -> Goals.time(logs)?.let { "Logged ${Times.format(it)}" }
                         ?: (if (Goals.isOverdue(goal, logs, today, today, now)) "Overdue · " else "By ") + Times.format(Goals.targetTime(goal, logs, today))
                     goal.kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit)
-                    else -> if (result == Result.DONE) "Done" else "Any time"
+                    else -> if (result.hit) "Done" else "Any time"
                 }
                 row.setTextViewText(R.id.row_status, status)
-                val finished = result == Result.DONE || result == Result.LATE || (goal.kind == Kind.CHECK && Goals.progress(goal, logs) >= 1.0)
+                val finished = result.hit || result == Result.LATE || (goal.kind == Kind.CHECK && Goals.progress(goal, logs) >= 1.0)
                 if (finished) {
                     row.setTextViewText(R.id.row_tick, "✓")
                     row.setInt(R.id.row_tick, "setBackgroundResource", R.drawable.widget_tick_done)

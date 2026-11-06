@@ -197,4 +197,134 @@ class GoalsTest {
         assertEquals(4, m.bestStreak?.second)
         assertEquals(0, m.mostImproved?.first)
     }
+
+    @Test
+    fun amountLevels() {
+        fun day(km: Double) = Goals.result(run, listOf(Log(LogType.HEALTH, d(1), km)), d(1), today)
+        assertEquals(Result.OVER, day(13.0))
+        assertEquals(Result.DONE, day(10.0))
+        assertEquals(Result.DONE, day(12.9))
+        assertEquals(Result.GOOD, day(8.0))
+        assertEquals(Result.GOOD, day(9.9))
+        assertEquals(Result.PARTIAL, day(6.0))
+        assertEquals(Result.PARTIAL, day(7.9))
+        assertEquals(Result.MISSED, day(5.9))
+        // Today it can still be reached, except that going well over counts straight away.
+        assertEquals(Result.PENDING, Goals.result(run, listOf(Log(LogType.HEALTH, today, 8.0)), today, today))
+        assertEquals(Result.OVER, Goals.result(run, listOf(Log(LogType.HEALTH, today, 14.0)), today, today))
+        assertTrue(Result.GOOD.hit && Result.OVER.hit && !Result.PARTIAL.hit)
+        assertEquals(Result.OVER, Goals.tier(18.2, 14.0))
+    }
+
+    @Test
+    fun movementCountsDistanceOrStepsWhicheverIsMore() {
+        assertEquals(10.0, Goals.movementKm(3.0, 13_500.0), 1e-9)
+        assertEquals(10.0, Goals.movementKm(10.0, 4_000.0), 1e-9)
+        assertEquals(6.0, Goals.movementKm(2.0, 8_100.0), 1e-9)
+        val move = Goal(kind = Kind.AMOUNT, goalValue = 10.0, health = HealthSource.MOVEMENT)
+        assertEquals("10 km or 13,500 steps", Goals.goalText(move, "km"))
+        // 13,500 steps and little distance recorded: achieved. 18,000 steps: overachieved.
+        assertEquals(Result.DONE, Goals.result(move, listOf(Log(LogType.HEALTH, d(1), Goals.movementKm(2.0, 13_500.0))), d(1), today))
+        assertEquals(Result.OVER, Goals.result(move, listOf(Log(LogType.HEALTH, d(1), Goals.movementKm(2.0, 18_000.0))), d(1), today))
+        assertEquals(Result.GOOD, Goals.result(move, listOf(Log(LogType.HEALTH, d(1), Goals.movementKm(8.0, 5_000.0))), d(1), today))
+    }
+
+    @Test
+    fun partlyDaysKeepAStreakAliveButDontAddToIt() {
+        val move = Goal(kind = Kind.AMOUNT, goalValue = 10.0, startDay = d(30))
+        val logs = mapOf(
+            d(1) to listOf(Log(LogType.HEALTH, d(1), 11.0)),
+            d(2) to listOf(Log(LogType.HEALTH, d(2), 6.5)),
+            d(3) to listOf(Log(LogType.HEALTH, d(3), 9.0)),
+            d(4) to listOf(Log(LogType.HEALTH, d(4), 10.0)),
+            d(5) to listOf(Log(LogType.HEALTH, d(5), 3.0)),
+        )
+        // 11, (6.5 keeps it alive), 9 (satisfied counts), 10, then a 3 km day breaks it.
+        assertEquals(3, Goals.currentStreak(move, logs, today))
+        val rate = Goals.hitRate(move, logs, d(5), d(1), today)
+        assertEquals(3, rate.done)
+        assertEquals(5, rate.counted)
+    }
+
+    @Test
+    fun hoursForTheWeek() {
+        val study = Goal(kind = Kind.AMOUNT, goalValue = 15.0, weekTotal = true, startDay = d(60))
+        assertTrue(study.weekly)
+        val monday = Goals.weekStart(today) // 2 Nov
+        val logs = mapOf(
+            monday to listOf(Log(LogType.AMOUNT, monday, 3.0)),
+            monday.plusDays(1) to listOf(Log(LogType.AMOUNT, monday.plusDays(1), 2.5), Log(LogType.AMOUNT, monday.plusDays(1), 1.0)),
+        )
+        assertEquals(6.5, Goals.weekAmount(study, logs, monday, today), 1e-9)
+        assertEquals(Result.PENDING, Goals.weekResult(study, logs, monday, today))
+        assertEquals("6.5 / 15 h".let { it }, "${Amounts.format(Goals.weekAmount(study, logs, monday, today))} / ${Amounts.withUnit(study.goalValue, "h")}")
+        assertEquals("15 h a week", Goals.goalText(study, "h"))
+        val lastMonday = monday.minusWeeks(1)
+        fun week(total: Double) = mapOf(lastMonday to listOf(Log(LogType.AMOUNT, lastMonday, total)))
+        assertEquals(Result.OVER, Goals.weekResult(study, week(20.0), lastMonday, today))
+        assertEquals(Result.DONE, Goals.weekResult(study, week(15.0), lastMonday, today))
+        assertEquals(Result.GOOD, Goals.weekResult(study, week(12.0), lastMonday, today))
+        assertEquals(Result.PARTIAL, Goals.weekResult(study, week(9.0), lastMonday, today))
+        assertEquals(Result.MISSED, Goals.weekResult(study, week(4.0), lastMonday, today))
+        assertEquals(1, Goals.currentStreak(study, week(15.0), today))
+        // Hours put in on a day make it an active day on the heatmap; no hours is a rest day.
+        assertEquals(Result.DONE, Goals.result(study, logs.getValue(monday), monday, today))
+        assertEquals(Result.OFF, Goals.result(study, emptyList(), d(10), today))
+    }
+
+    @Test
+    fun parsingHours() {
+        assertEquals(1.5, Amounts.parseHours("1.5")!!, 1e-9)
+        assertEquals(1.5, Amounts.parseHours("1,5")!!, 1e-9)
+        assertEquals(1.5, Amounts.parseHours("1:30")!!, 1e-9)
+        assertEquals(0.75, Amounts.parseHours("0:45")!!, 1e-9)
+        assertNull(Amounts.parseHours("0:00"))
+        assertNull(Amounts.parseHours("1:75"))
+        assertNull(Amounts.parseHours("30"))
+        assertNull(Amounts.parseHours("abc"))
+        assertEquals("30 min", Amounts.hoursText(0.5))
+        assertEquals("1 h 30", Amounts.hoursText(1.5))
+        assertEquals("2 h", Amounts.hoursText(2.0))
+    }
+
+    @Test
+    fun aTimePickedAfterMidnightForABedtimeIsLateForThatNight() {
+        val bed = Goal(kind = Kind.BY_TIME, timeMinutes = 23 * 60 + 45, startDay = d(30))
+        val target = { _: LocalDate -> 23 * 60 + 45 }
+        // Picked 02:00 from today's card: last night, 26:00, late.
+        val (day, min) = Goals.pickAdjust(bed, today, today, 2 * 60, target)
+        assertEquals(d(1), day)
+        assertEquals(26 * 60, min)
+        assertEquals(Result.LATE, Goals.result(bed, listOf(Log(LogType.TIME, day, min.toDouble())), day, today))
+        // Picked 02:00 from an earlier day's card: that day's night.
+        assertEquals(d(3) to 26 * 60, Goals.pickAdjust(bed, d(3), today, 2 * 60, target))
+        // 23:30 is on time and untouched; so is 04:00 or later.
+        assertEquals(today to (23 * 60 + 30), Goals.pickAdjust(bed, today, today, 23 * 60 + 30, target))
+        assertEquals(today to (4 * 60), Goals.pickAdjust(bed, today, today, 4 * 60, target))
+        // A morning target (wake up by 07:00) is never moved.
+        val wake = Goal(kind = Kind.BY_TIME, timeMinutes = 7 * 60)
+        assertEquals(today to 90, Goals.pickAdjust(wake, today, today, 90) { 7 * 60 })
+        // Already adjusted times pass through unchanged, so Now and the picker agree.
+        assertEquals(d(1) to 26 * 60, Goals.pickAdjust(bed, d(1), today, 26 * 60, target))
+    }
+
+    @Test
+    fun weeklySummary() {
+        val move = Goal(kind = Kind.AMOUNT, goalValue = 10.0, startDay = d(40))
+        val km = listOf(9.0, 12.0, 14.0, 6.5) // Sun, Mon … for the days before Wednesday 4 Nov
+        val byDay = mapOf(
+            d(3) to listOf(Log(LogType.HEALTH, d(3), km[0])), // Sun 1
+            d(2) to listOf(Log(LogType.HEALTH, d(2), km[1])), // Mon 2
+            d(1) to listOf(Log(LogType.HEALTH, d(1), km[2])), // Tue 3
+        )
+        val monday = Goals.weekStart(today)
+        val s = Goals.summary(listOf(move to byDay), listOf("km"), monday, monday.plusDays(6), monday.minusWeeks(1), monday.minusDays(1), today)
+        assertEquals(2, s.done) // Mon 12 and Tue 14
+        assertEquals(2, s.counted)
+        assertEquals(1, s.overachieved) // 14 km is 140%
+        assertEquals(listOf("km" to 26.0), s.totals)
+        assertEquals(100, s.percent)
+        // The week before: Sunday 1 Nov was 9 km (satisfied) and counted as a hit.
+        assertEquals(14, s.previousPercent) // 1 hit (Sunday, 9 km) in 7 days
+    }
 }

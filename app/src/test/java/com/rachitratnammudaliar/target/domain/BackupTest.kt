@@ -10,7 +10,7 @@ import org.junit.Test
 class BackupTest {
     @Test
     fun roundTrip() {
-        val run = Habit(id = 4, name = "Run", emoji = "🏃", kind = "AMOUNT", goalValue = 10.0, unit = "km", days = Days.WEEKDAYS, health = "RUN_DISTANCE", step = 1.0, startDay = 20000, sortOrder = 2, createdAt = 5, weeklyTimes = 3)
+        val run = Habit(id = 4, name = "Run", emoji = "🏃", kind = "AMOUNT", goalValue = 10.0, unit = "km", days = Days.WEEKDAYS, health = "RUN_DISTANCE", step = 1.0, startDay = 20000, sortOrder = 2, createdAt = 5, weeklyTimes = 3, weekTotal = true)
         val wake = Habit(id = 7, name = "Wake up", emoji = "⏰", kind = "BY_TIME", timeMinutes = 420, startDay = 20001, createdAt = 6, dayTimes = "2=480;6=540", pauseStart = 20020, pauseEnd = 20025)
         val logs = listOf(
             Entry(targetId = 4, epochDay = 20010, type = "HEALTH", value = 6.4, createdAt = 1),

@@ -11,6 +11,7 @@ import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.rachitratnammudaliar.target.domain.Amounts
+import com.rachitratnammudaliar.target.domain.Goals
 import com.rachitratnammudaliar.target.domain.HealthSource
 import java.time.LocalDate
 import java.time.ZoneId
@@ -50,6 +51,12 @@ class Health(private val context: Context) {
                     c.aggregate(AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), range))[StepsRecord.COUNT_TOTAL]?.toDouble() ?: 0.0
                 HealthSource.DISTANCE ->
                     c.aggregate(AggregateRequest(setOf(DistanceRecord.DISTANCE_TOTAL), range))[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+                HealthSource.MOVEMENT -> {
+                    // Walking, running and cycling distance, or the steps, whichever you're further along on.
+                    val km = c.aggregate(AggregateRequest(setOf(DistanceRecord.DISTANCE_TOTAL), range))[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+                    val steps = c.aggregate(AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), range))[StepsRecord.COUNT_TOTAL]?.toDouble() ?: 0.0
+                    Goals.movementKm(km, steps)
+                }
                 HealthSource.RUN_DISTANCE -> {
                     // Distance recorded during running workouts only, so walking doesn't count.
                     val runs = c.readRecords(ReadRecordsRequest(ExerciseSessionRecord::class, range)).records

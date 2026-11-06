@@ -25,6 +25,8 @@ enum class HealthSource(val label: String, val unit: String, val step: Double) {
     NONE("Log it myself", "", 1.0),
     STEPS("Steps", "steps", 1000.0),
     DISTANCE("Walking and running distance", "km", 1.0),
+    /** Distance and steps together: whichever you're further along on counts, 1,350 steps to the km. */
+    MOVEMENT("Moving: walking, running and steps together", "km", 1.0),
     RUN_DISTANCE("Running distance", "km", 1.0),
     EXERCISE_MINUTES("Active time (workouts)", "min", 15.0),
     ACTIVE_CALORIES("Active calories", "kcal", 100.0);
@@ -61,10 +63,14 @@ enum class LogType {
 /** How a target went on one day. */
 enum class Result(val label: String) {
     DONE("Done"),
+    /** AMOUNT: 130% or more of the goal. */
+    OVER("Overachieved"),
+    /** AMOUNT: 80% to just under 100% of the goal. */
+    GOOD("Satisfied"),
     /** BY_TIME done, but after the time. */
     LATE("Late"),
-    /** AMOUNT started but short of the goal, on a day that's over. */
-    PARTIAL("Not quite"),
+    /** AMOUNT: 60% to just under 80% of the goal, on a day that's over. Keeps a streak alive. */
+    PARTIAL("Partly achieved"),
     MISSED("Missed"),
     SKIPPED("Skipped"),
     /** Today (or later) and not done yet. */
@@ -73,7 +79,10 @@ enum class Result(val label: String) {
     OFF("Rest day");
 
     /** Days that count towards hit rates and streaks. */
-    val counts: Boolean get() = this == DONE || this == LATE || this == PARTIAL || this == MISSED
+    val counts: Boolean get() = this == DONE || this == OVER || this == GOOD || this == LATE || this == PARTIAL || this == MISSED
+
+    /** Days that count as a hit: they add to a streak and to the hit rate. */
+    val hit: Boolean get() = this == DONE || this == OVER || this == GOOD
 }
 
 /** A target as the rules see it, independent of the database. */
@@ -95,8 +104,10 @@ data class Goal(
     /** Paused from [pauseStart] to [pauseEnd], both included: those days count as skipped. */
     val pauseStart: LocalDate? = null,
     val pauseEnd: LocalDate? = null,
+    /** AMOUNT: [goalValue] is the total to reach over the week (15 hours of study), not a daily one. */
+    val weekTotal: Boolean = false,
 ) {
-    val weekly: Boolean get() = weeklyTimes > 0 && kind != Kind.BY_TIME
+    val weekly: Boolean get() = (weeklyTimes > 0 && kind != Kind.BY_TIME) || (weekTotal && kind == Kind.AMOUNT)
 }
 
 data class Log(val type: LogType, val date: LocalDate, val value: Double = 1.0)
@@ -170,6 +181,27 @@ object Amounts {
     /** "6.2 km", "10,000 steps", "3 glasses". */
     fun withUnit(v: Double, unit: String): String = if (unit.isBlank()) format(v) else "${format(v)} $unit"
 
+    /** Hours: "1.5", "1,5" or "1:30" -> 1.5. Null if not a positive number of hours. */
+    fun parseHours(text: String): Double? {
+        val t = text.trim()
+        if (':' in t) {
+            val h = t.substringBefore(':').trim().toIntOrNull() ?: return null
+            val m = t.substringAfter(':').trim().toIntOrNull() ?: return null
+            return if (h < 0 || m !in 0..59 || (h == 0 && m == 0) || h > 24) null else round(h + m / 60.0)
+        }
+        return parse(t)?.takeIf { it <= 24 }
+    }
+
+    /** 0.5 -> "30 min", 1.5 -> "1 h 30", 2 -> "2 h". */
+    fun hoursText(h: Double): String {
+        val total = Math.round(h * 60).toInt()
+        return when {
+            total < 60 -> "$total min"
+            total % 60 == 0 -> "${total / 60} h"
+            else -> "${total / 60} h ${total % 60}"
+        }
+    }
+
     /** "1.5", "1,5", "10 000" -> number. Null if not a positive number. */
     fun parse(text: String): Double? {
         val v = text.trim().replace(" ", "").replace(',', '.').toDoubleOrNull() ?: return null
@@ -178,6 +210,27 @@ object Amounts {
 }
 
 object Goals {
+    /** An amount counts as "not quite" from 60% of the goal, "nearly there" from 80%, "overachieved" from 130%. */
+    const val PARTIAL_AT = 0.6
+    const val GOOD_AT = 0.8
+    const val OVER_AT = 1.3
+
+    /** 10 km = 13,500 steps. */
+    const val STEPS_PER_KM = 1350.0
+
+    /** Kilometres you've effectively moved: the further of the distance and the steps. */
+    fun movementKm(km: Double, steps: Double): Double = Amounts.round(maxOf(km, steps / STEPS_PER_KM))
+
+    /** The tier an [amount] reaches against [goal]: DONE and up are hits. Null below 60%. */
+    fun tier(amount: Double, goal: Double): Result? = when {
+        goal <= 0 -> null
+        amount >= goal * OVER_AT - 1e-9 -> Result.OVER
+        amount >= goal - 1e-9 -> Result.DONE
+        amount >= goal * GOOD_AT - 1e-9 -> Result.GOOD
+        amount >= goal * PARTIAL_AT - 1e-9 -> Result.PARTIAL
+        else -> null
+    }
+
     /** Before this time, logging an evening target ("in bed by 23:00") counts for the day before. */
     const val NIGHT_CUTOFF = 4 * 60
 
@@ -233,8 +286,15 @@ object Goals {
             Kind.BY_TIME -> time(logs)?.let { return if (it <= targetTime(goal, logs, day)) Result.DONE else Result.LATE }
             Kind.AMOUNT -> {
                 val got = amount(logs)
-                if (got >= goal.goalValue - 1e-9) return Result.DONE
-                if (over && got > 0 && !goal.weekly) return Result.PARTIAL
+                if (goal.weekTotal) {
+                    // Any hours put in make it an active day; the week is judged in weekResult.
+                    if (got > 0) return Result.DONE
+                } else {
+                    val tier = tier(got, goal.goalValue)
+                    if (tier == Result.OVER || tier == Result.DONE) return tier
+                    // Not there yet today: it can still be reached. Once the day is over, 80% and 60% count.
+                    if (over && !goal.weekly && tier != null) return tier
+                }
             }
         }
         if (goal.weekly) {
@@ -261,6 +321,17 @@ object Goals {
         ) yesterday to nowMinutes + 24 * 60 else today to nowMinutes
     }
 
+    /**
+     * A time picked by hand for [day]. For an evening target (18:00 or later, like "in bed by 23:45"),
+     * 02:00 is after midnight, so it is 26:00 and late, not 02:00 and early. Picked for today, it
+     * belongs to last night; picked for an earlier day, to that day's night.
+     */
+    fun pickAdjust(goal: Goal, day: LocalDate, today: LocalDate, minutes: Int, targetOn: (LocalDate) -> Int): Pair<LocalDate, Int> {
+        if (goal.kind != Kind.BY_TIME || minutes >= NIGHT_CUTOFF) return day to minutes
+        val night = if (day == today && isScheduled(goal, day.minusDays(1))) day.minusDays(1) else day
+        return if (targetOn(night) >= 18 * 60) night to minutes + 24 * 60 else day to minutes
+    }
+
     /* ---------- Weeks, for "X times a week" targets ---------- */
 
     /** Days done in the week starting [monday]. */
@@ -274,9 +345,20 @@ object Goals {
         val end = monday.plusDays(6)
         if (end.isBefore(goal.startDay)) return Result.OFF
         if ((0L..6L).all { isPaused(goal, monday.plusDays(it)) }) return Result.SKIPPED
+        if (goal.weekTotal) {
+            val tier = tier(weekAmount(goal, logsByDay, monday, today), goal.goalValue)
+            if (tier == Result.OVER || tier == Result.DONE) return tier
+            if (!end.isBefore(today)) return Result.PENDING
+            return tier ?: Result.MISSED
+        }
         if (timesInWeek(goal, logsByDay, monday, today) >= goal.weeklyTimes) return Result.DONE
         return if (!end.isBefore(today)) Result.PENDING else Result.MISSED
     }
+
+    /** weekTotal targets: the amount added up over the week starting [monday], up to today. */
+    fun weekAmount(goal: Goal, logsByDay: Map<LocalDate, List<Log>>, monday: LocalDate, today: LocalDate): Double =
+        Amounts.round((0L..6L).map { monday.plusDays(it) }.filter { !it.isAfter(today) && !it.isBefore(goal.startDay) && !isPaused(goal, it) }
+            .sumOf { amount(logsByDay[it].orEmpty()) })
 
     /**
      * Days in a row the target was done, counting back from today (weeks in a row for weekly
@@ -287,9 +369,10 @@ object Goals {
         if (goal.weekly) {
             var monday = weekStart(today)
             while (!monday.plusDays(6).isBefore(goal.startDay) && streak < 600) {
-                when (weekResult(goal, logsByDay, monday, today)) {
-                    Result.DONE -> streak++
-                    Result.PENDING, Result.SKIPPED, Result.OFF -> {}
+                val w = weekResult(goal, logsByDay, monday, today)
+                when {
+                    w.hit -> streak++
+                    w == Result.PENDING || w == Result.SKIPPED || w == Result.OFF || w == Result.PARTIAL -> {}
                     else -> return streak
                 }
                 monday = monday.minusWeeks(1)
@@ -298,9 +381,11 @@ object Goals {
         }
         var day = today
         while (!day.isBefore(goal.startDay)) {
-            when (result(goal, logsByDay[day].orEmpty(), day, today)) {
-                Result.DONE -> streak++
-                Result.OFF, Result.SKIPPED, Result.PENDING -> {}
+            val r = result(goal, logsByDay[day].orEmpty(), day, today)
+            when {
+                r.hit -> streak++
+                // "Not quite" days neither add to the streak nor break it.
+                r == Result.OFF || r == Result.SKIPPED || r == Result.PENDING || r == Result.PARTIAL -> {}
                 else -> return streak
             }
             day = day.minusDays(1)
@@ -317,9 +402,10 @@ object Goals {
         if (goal.weekly) {
             var monday = weekStart(first)
             while (!monday.isAfter(today)) {
-                when (weekResult(goal, logsByDay, monday, today)) {
-                    Result.DONE -> { run++; best = maxOf(best, run) }
-                    Result.PENDING, Result.SKIPPED, Result.OFF -> {}
+                val w = weekResult(goal, logsByDay, monday, today)
+                when {
+                    w.hit -> { run++; best = maxOf(best, run) }
+                    w == Result.PENDING || w == Result.SKIPPED || w == Result.OFF || w == Result.PARTIAL -> {}
                     else -> run = 0
                 }
                 monday = monday.plusWeeks(1)
@@ -328,9 +414,10 @@ object Goals {
         }
         var day = first
         while (!day.isAfter(today)) {
-            when (result(goal, logsByDay[day].orEmpty(), day, today)) {
-                Result.DONE -> { run++; best = maxOf(best, run) }
-                Result.OFF, Result.SKIPPED, Result.PENDING -> {}
+            val r = result(goal, logsByDay[day].orEmpty(), day, today)
+            when {
+                r.hit -> { run++; best = maxOf(best, run) }
+                r == Result.OFF || r == Result.SKIPPED || r == Result.PENDING || r == Result.PARTIAL -> {}
                 else -> run = 0
             }
             day = day.plusDays(1)
@@ -354,9 +441,10 @@ object Goals {
         if (goal.weekly) {
             var monday = weekStart(maxOf(from, goal.startDay))
             while (!monday.isAfter(minOf(to, today))) {
-                when (weekResult(goal, logsByDay, monday, today)) {
-                    Result.DONE -> { done++; counted++ }
-                    Result.MISSED -> counted++
+                val w = weekResult(goal, logsByDay, monday, today)
+                when {
+                    w.hit -> { done++; counted++ }
+                    w == Result.MISSED || w == Result.PARTIAL -> counted++
                     else -> {}
                 }
                 monday = monday.plusWeeks(1)
@@ -367,7 +455,7 @@ object Goals {
         val end = minOf(to, today)
         while (!day.isAfter(end)) {
             val r = result(goal, logsByDay[day].orEmpty(), day, today)
-            if (r == Result.DONE) done++
+            if (r.hit) done++
             if (r.counts) counted++
             day = day.plusDays(1)
         }
@@ -388,13 +476,13 @@ object Goals {
         goals.forEach { (goal, byDay) ->
             val r = result(goal, byDay[day].orEmpty(), day, today)
             if (goal.weekly) {
-                if (r == Result.DONE) { done++; scheduled++ }
+                if (r.hit) { done++; scheduled++ }
                 else if (r == Result.PENDING && day == today && weekResult(goal, byDay, weekStart(day), today) == Result.PENDING) scheduled++
                 return@forEach
             }
             when (r) {
                 Result.OFF, Result.SKIPPED -> {}
-                Result.DONE -> { done++; scheduled++ }
+                Result.DONE, Result.OVER, Result.GOOD -> { done++; scheduled++ }
                 else -> scheduled++
             }
         }
@@ -406,8 +494,10 @@ object Goals {
         val base = when (goal.kind) {
             Kind.CHECK -> "Any time"
             Kind.BY_TIME -> "By ${Times.format(goal.timeMinutes)}" + if (goal.dayTimes.isNotEmpty()) " (varies)" else ""
-            Kind.AMOUNT -> Amounts.withUnit(goal.goalValue, unit)
+            Kind.AMOUNT -> Amounts.withUnit(goal.goalValue, unit) +
+                if (goal.health == HealthSource.MOVEMENT) " or ${Amounts.format(goal.goalValue * STEPS_PER_KM)} steps" else ""
         }
+        if (goal.weekTotal) return "$base a week"
         return if (goal.weekly) (if (goal.kind == Kind.CHECK) "" else "$base, ") + "${goal.weeklyTimes}× a week" else base
     }
 
@@ -420,6 +510,98 @@ object Goals {
 
     /** Monday of [day]'s week. */
     fun weekStart(day: LocalDate): LocalDate = day.minusDays((day.dayOfWeek.value - 1).toLong())
+
+    /* ---------- Weekly and monthly summary ---------- */
+
+    data class Summary(
+        val from: LocalDate,
+        val to: LocalDate,
+        val done: Int,
+        val counted: Int,
+        /** Hit rate of the period before, in percent, if there was one. */
+        val previousPercent: Int?,
+        val bestDay: DayOfWeek?,
+        val toughestDay: DayOfWeek?,
+        /** Amounts added up by unit: 42.3 km, 14 h, 61,200 steps. */
+        val totals: List<Pair<String, Double>>,
+        /** Days (weeks for weekly targets) that reached 130% or more. */
+        val overachieved: Int,
+        /** Index and percent of the target hit most often, and least often. */
+        val top: Pair<Int, Int>?,
+        val weakest: Pair<Int, Int>?,
+    ) {
+        val percent: Int? get() = if (counted == 0) null else Math.round(done * 100.0 / counted).toInt()
+    }
+
+    /** Everything from [from] to [to] (cut at today), against the same-length period just before it. */
+    fun summary(goals: List<Pair<Goal, Map<LocalDate, List<Log>>>>, units: List<String>, from: LocalDate, to: LocalDate, prevFrom: LocalDate, prevTo: LocalDate, today: LocalDate): Summary {
+        val end = minOf(to, today)
+        var done = 0
+        var counted = 0
+        var prevDone = 0
+        var prevCounted = 0
+        var over = 0
+        val perTarget = mutableListOf<Pair<Int, Int>>()
+        val totals = linkedMapOf<String, Double>()
+        goals.forEachIndexed { i, (goal, byDay) ->
+            val rate = hitRate(goal, byDay, from, to, today)
+            done += rate.done
+            counted += rate.counted
+            val before = hitRate(goal, byDay, prevFrom, prevTo, today)
+            prevDone += before.done
+            prevCounted += before.counted
+            rate.percent?.let { perTarget += i to it }
+            if (goal.weekly) {
+                var monday = weekStart(maxOf(from, goal.startDay))
+                while (!monday.isAfter(end)) {
+                    if (weekResult(goal, byDay, monday, today) == Result.OVER) over++
+                    monday = monday.plusWeeks(1)
+                }
+            } else {
+                var d = maxOf(from, goal.startDay)
+                while (!d.isAfter(end)) {
+                    if (result(goal, byDay[d].orEmpty(), d, today) == Result.OVER) over++
+                    d = d.plusDays(1)
+                }
+            }
+            if (goal.kind == Kind.AMOUNT) {
+                var d = maxOf(from, goal.startDay)
+                var sum = 0.0
+                while (!d.isAfter(end)) {
+                    if (!isPaused(goal, d)) sum += amount(byDay[d].orEmpty())
+                    d = d.plusDays(1)
+                }
+                val unit = units.getOrElse(i) { "" }
+                if (sum > 0 && unit.isNotBlank()) totals[unit] = (totals[unit] ?: 0.0) + sum
+            }
+        }
+        // Which weekday goes best, which worst.
+        val byWeekday = mutableMapOf<DayOfWeek, MutableList<Double>>()
+        var d = from
+        while (!d.isAfter(end)) {
+            val s = dayScore(goals, d, today)
+            if (s.scheduled > 0 && d != today) byWeekday.getOrPut(d.dayOfWeek) { mutableListOf() }.add(s.fraction)
+            d = d.plusDays(1)
+        }
+        val avg = byWeekday.mapValues { it.value.average() }
+        val best = avg.maxByOrNull { it.value }
+        val worst = avg.minByOrNull { it.value }
+        val spread = best != null && worst != null && best.key != worst.key && best.value - worst.value >= 0.15
+        val order = listOf("km", "steps", "h", "min", "kcal")
+        return Summary(
+            from = from,
+            to = to,
+            done = done,
+            counted = counted,
+            previousPercent = if (prevCounted == 0) null else Math.round(prevDone * 100.0 / prevCounted).toInt(),
+            bestDay = if (spread) best!!.key else null,
+            toughestDay = if (spread) worst!!.key else null,
+            totals = totals.entries.sortedBy { order.indexOf(it.key).let { i -> if (i < 0) 99 else i } }.map { it.key to Amounts.round(it.value) },
+            overachieved = over,
+            top = perTarget.maxByOrNull { it.second }?.takeIf { perTarget.size > 1 },
+            weakest = perTarget.minByOrNull { it.second }?.takeIf { perTarget.size > 1 },
+        )
+    }
 
     /* ---------- Monthly report ---------- */
 
@@ -457,13 +639,15 @@ object Goals {
 }
 
 /** Ready-made targets for a quick start. */
-data class Template(val emoji: String, val name: String, val kind: Kind, val goalValue: Double = 1.0, val timeMinutes: Int = 0, val unit: String = "", val health: HealthSource = HealthSource.NONE, val days: Int = Days.ALL, val weeklyTimes: Int = 0)
+data class Template(val emoji: String, val name: String, val kind: Kind, val goalValue: Double = 1.0, val timeMinutes: Int = 0, val unit: String = "", val health: HealthSource = HealthSource.NONE, val days: Int = Days.ALL, val weeklyTimes: Int = 0, val weekTotal: Boolean = false)
 
 object Templates {
     val all = listOf(
         Template("⏰", "Wake up", Kind.BY_TIME, timeMinutes = 7 * 60),
         Template("📚", "At the library", Kind.BY_TIME, timeMinutes = 9 * 60, days = Days.WEEKDAYS),
+        Template("🚶", "Move", Kind.AMOUNT, 10.0, unit = "km", health = HealthSource.MOVEMENT),
         Template("🏃", "Run", Kind.AMOUNT, 5.0, unit = "km", health = HealthSource.RUN_DISTANCE, weeklyTimes = 3),
+        Template("🎓", "Self-study", Kind.AMOUNT, 15.0, unit = "h", weekTotal = true),
         Template("👟", "Steps", Kind.AMOUNT, 10_000.0, unit = "steps", health = HealthSource.STEPS),
         Template("🔥", "Burn calories", Kind.AMOUNT, 500.0, unit = "kcal", health = HealthSource.ACTIVE_CALORIES),
         Template("💪", "Be active", Kind.AMOUNT, 60.0, unit = "min", health = HealthSource.EXERCISE_MINUTES),

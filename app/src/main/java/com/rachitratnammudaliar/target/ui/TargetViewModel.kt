@@ -124,8 +124,12 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
      * BY_TIME: done at [minutes] after midnight on [day], replacing an earlier time for that day. The
      * day's target time is saved with it, so changing the target later never rewrites this day.
      */
-    fun logTime(target: Habit, day: LocalDate, minutes: Int, onLogged: (Long) -> Unit = {}) {
+    fun logTime(target: Habit, pickedDay: LocalDate, pickedMinutes: Int, onLogged: (Long) -> Unit = {}) {
         viewModelScope.launch {
+            // 02:00 on a "in bed by 23:45" target is after midnight: late, for the night it belongs to.
+            val allLogs = dao.logs().filter { it.targetId == target.id }.map { it.toLog() }
+            val goal = target.goal()
+            val (day, minutes) = Goals.pickAdjust(goal, pickedDay, LocalDate.now(), pickedMinutes) { n -> Goals.targetTime(goal, allLogs.filter { it.date == n }, n) }
             val d = day.toEpochDay()
             if (dao.entryOfType(target.id, d, LogType.TARGET.name) == null) {
                 val logs = dao.logs().filter { it.targetId == target.id && it.epochDay == d }.map { it.toLog() }
@@ -285,6 +289,13 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
             add(Habit(name = "Run", emoji = "🏃", kind = Kind.AMOUNT.name, goalValue = 5.0, unit = "km", health = HealthSource.RUN_DISTANCE.name, weeklyTimes = 3, sortOrder = 3)) { ago ->
                 if (ago % 2 == 1L) emptyList() else listOf(Entry(targetId = 0, epochDay = day(ago), type = "HEALTH", value = (30 + rnd.nextInt(35)) / 10.0 + 1.0))
             }
+            // Walking, running and steps together: 10 km or 13,500 steps. Some days 6-8 km, a few over 13 km.
+            add(Habit(name = "Move", emoji = "🚶", kind = Kind.AMOUNT.name, goalValue = 10.0, unit = "km", step = 1.0, health = HealthSource.MOVEMENT.name, sortOrder = 3)) { ago ->
+                listOf(Entry(targetId = 0, epochDay = day(ago), type = "HEALTH", value = (55 + rnd.nextInt(90)) / 10.0))
+            }
+            add(Habit(name = "Self-study", emoji = "🎓", kind = Kind.AMOUNT.name, goalValue = 15.0, unit = "h", step = 0.5, weekTotal = true, sortOrder = 3)) { ago ->
+                if (ago % 7 == 6L || ago % 7 == 5L) emptyList() else listOf(Entry(targetId = 0, epochDay = day(ago), type = "AMOUNT", value = 1.5 + rnd.nextInt(3) / 2.0))
+            }
             add(Habit(name = "Steps", emoji = "👟", kind = Kind.AMOUNT.name, goalValue = 10_000.0, unit = "steps", step = 1000.0, health = HealthSource.STEPS.name, sortOrder = 4)) { ago ->
                 listOf(Entry(targetId = 0, epochDay = day(ago), type = "HEALTH", value = (6000 + rnd.nextInt(7000)).toDouble()))
             }
@@ -297,6 +308,8 @@ class TargetViewModel(app: Application) : AndroidViewModel(app) {
             // Today: some done, some still to do.
             val ids = dao.targets().associateBy { it.name }
             ids["Wake up"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "TIME", value = 412.0)) }
+            ids["Move"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "HEALTH", value = 8.4)) }
+            ids["Self-study"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "AMOUNT", value = 2.0)) }
             ids["Steps"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "HEALTH", value = 6420.0)) }
             ids["Drink water"]?.let { t -> repeat(3) { dao.insert(Entry(targetId = t.id, epochDay = today.toEpochDay(), type = "AMOUNT", value = 1.0)) } }
             ids["Run"]?.let { dao.insert(Entry(targetId = it.id, epochDay = today.toEpochDay(), type = "HEALTH", value = 5.4)) }

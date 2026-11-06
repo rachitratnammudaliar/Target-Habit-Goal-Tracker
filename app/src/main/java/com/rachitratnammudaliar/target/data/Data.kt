@@ -60,6 +60,8 @@ data class Habit(
     /** Paused from this epoch day to [pauseEnd]; 0 = not paused. */
     val pauseStart: Long = 0,
     val pauseEnd: Long = 0,
+    /** AMOUNT: [goalValue] is a total for the week (15 hours of study), not a daily amount. */
+    val weekTotal: Boolean = false,
 )
 
 /** One thing logged for a target on a day. */
@@ -88,6 +90,7 @@ fun Habit.goal(): Goal = Goal(
     weeklyTimes = weeklyTimes,
     pauseStart = if (pauseEnd > 0) LocalDate.ofEpochDay(pauseStart) else null,
     pauseEnd = if (pauseEnd > 0) LocalDate.ofEpochDay(pauseEnd) else null,
+    weekTotal = weekTotal,
 )
 fun Habit.pausedOn(day: LocalDate): Boolean = pauseEnd > 0 && day.toEpochDay() in pauseStart..pauseEnd
 fun Entry.typeValue(): LogType = LogType.fromName(type)
@@ -176,7 +179,14 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [Habit::class, Entry::class], version = 2, exportSchema = false)
+/** Version 2 -> 3 (app 1.2.0): weekly totals, like 15 hours of study a week. */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE targets ADD COLUMN weekTotal INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Habit::class, Entry::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): TargetDao
 
@@ -189,7 +199,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { instance = it }
             }
     }

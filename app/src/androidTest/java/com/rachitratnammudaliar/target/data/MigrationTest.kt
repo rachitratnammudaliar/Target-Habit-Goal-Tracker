@@ -38,7 +38,7 @@ class MigrationTest {
             db.version = 1
         }
 
-        val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName).addMigrations(MIGRATION_1_2).build()
+        val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
         try {
             runBlocking {
                 val dao = room.dao()
@@ -48,12 +48,14 @@ class MigrationTest {
                 assertEquals("", t.dayTimes)
                 assertEquals(0, t.weeklyTimes)
                 assertEquals(0L, t.pauseEnd)
+                assertEquals(false, t.weekTotal)
                 val log = dao.logs().single()
                 assertEquals(415.0, log.value, 0.0)
                 assertEquals("", log.note)
                 // The new columns can be written after the update.
-                dao.update(t.copy(dayTimes = "2=600", weeklyTimes = 0))
+                dao.update(t.copy(dayTimes = "2=600", weeklyTimes = 0, weekTotal = true))
                 assertEquals("2=600", dao.target(1)!!.dayTimes)
+                assertEquals(true, dao.target(1)!!.weekTotal)
                 dao.insert(Entry(targetId = 1, epochDay = 20002, type = "NOTE", note = "Exam week"))
                 assertEquals("Exam week", dao.logs().first { it.type == "NOTE" }.note)
                 assertEquals(2, dao.deleteLogsBefore(20003))

@@ -89,6 +89,8 @@ fun resultColor(r: Result): Color {
     val dark = isSystemInDarkTheme()
     return when (r) {
         Result.DONE -> if (dark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+        Result.OVER -> if (dark) Color(0xFF22D3EE) else Color(0xFF0891B2)
+        Result.GOOD -> if (dark) Color(0xFFA3E635) else Color(0xFF65A30D)
         Result.LATE, Result.PARTIAL -> if (dark) Color(0xFFFBBF24) else Color(0xFFD97706)
         Result.MISSED -> if (dark) Color(0xFFF87171) else Color(0xFFDC2626)
         Result.SKIPPED -> if (dark) Color(0xFF64748B) else Color(0xFF94A3B8)
@@ -322,11 +324,11 @@ fun Heatmap(weeks: List<List<Result?>>, cell: Dp = 14.dp) {
 @Composable
 fun HeatmapKey() {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-        listOf(Result.DONE, Result.LATE, Result.MISSED, Result.SKIPPED, Result.OFF).forEach { r ->
+        listOf(Result.OVER, Result.DONE, Result.GOOD, Result.LATE, Result.MISSED, Result.SKIPPED, Result.OFF).forEach { r ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(resultColor(r)))
                 Spacer(Modifier.size(4.dp))
-                Text(if (r == Result.LATE) "Late / not quite" else r.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (r == Result.LATE) "Late / partly" else r.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

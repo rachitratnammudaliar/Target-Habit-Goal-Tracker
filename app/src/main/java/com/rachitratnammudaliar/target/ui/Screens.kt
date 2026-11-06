@@ -385,9 +385,22 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
                         (if (result == Result.DONE) "Done at " else "Late: ") + Times.format(Goals.time(logs)!!) + " · target ${Times.format(target)}"
                     overdue -> "Overdue · target ${Times.format(target)}"
                     kind == Kind.BY_TIME -> "By ${Times.format(target)}" + (if (movedToday) " today" else "") + if (result == Result.MISSED) " · missed" else ""
-                    kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit) + if (goal.weekly) " · $weekCount/${goal.weeklyTimes} this wk" else ""
-                    goal.weekly -> (if (result == Result.DONE) "Done · " else "") + "$weekCount of ${goal.weeklyTimes} this week"
-                    result == Result.DONE -> "Done"
+                    kind == Kind.AMOUNT && goal.weekTotal -> {
+                        val got = Goals.amount(logs)
+                        "${Amounts.format(Goals.weekAmount(goal, byDay, Goals.weekStart(day), today))} / ${Amounts.withUnit(goal.goalValue, t.unit)} this week" +
+                            if (got > 0) " · +${Amounts.format(got)} today" else ""
+                    }
+                    kind == Kind.AMOUNT -> Goals.progressText(goal, logs, t.unit) +
+                        (if (goal.weekly) " · $weekCount/${goal.weeklyTimes} this wk" else "") +
+                        when (Goals.tier(Goals.amount(logs), goal.goalValue)) {
+                            Result.OVER -> " · ⭐ Overachieved"
+                            Result.DONE -> " · Done ✓"
+                            Result.GOOD -> " · Satisfied"
+                            Result.PARTIAL -> " · Partly there"
+                            else -> ""
+                        }
+                    goal.weekly -> (if (result.hit) "Done · " else "") + "$weekCount of ${goal.weeklyTimes} this week"
+                    result.hit -> "Done"
                     result == Result.MISSED -> "Missed"
                     else -> "Not done yet"
                 }
@@ -399,7 +412,7 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
                         result == Result.PENDING || result == Result.SKIPPED -> MaterialTheme.colorScheme.onSurfaceVariant
                         else -> resultColor(result)
                     },
-                    fontWeight = if (result == Result.DONE || overdue) FontWeight.Medium else null,
+                    fontWeight = if (result.hit || overdue) FontWeight.Medium else null,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -441,7 +454,9 @@ private fun TargetCard(vm: TargetViewModel, state: TargetState, t: Habit, day: L
                         }
                     }
                     Kind.AMOUNT -> FilledIconButton(onClick = {
-                        vm.addAmount(t, day, t.step) { id -> scope.undoSnackbar(snackbar, "Added ${Amounts.withUnit(t.step, t.unit)} to ${t.name}") { vm.deleteEntry(id) } }
+                        // Hours are asked for ("how many hours?"); other amounts add one step.
+                        if (t.unit.trim() == "h") adding = true
+                        else vm.addAmount(t, day, t.step) { id -> scope.undoSnackbar(snackbar, "Added ${Amounts.withUnit(t.step, t.unit)} to ${t.name}") { vm.deleteEntry(id) } }
                     }) { Icon(Icons.Default.Add, contentDescription = "Add ${Amounts.withUnit(t.step, t.unit)}") }
                 }
             }
@@ -534,13 +549,23 @@ fun PauseDialog(t: Habit, today: LocalDate, onDismiss: () -> Unit, onPause: (Loc
 @Composable
 fun AmountDialog(t: Habit, onDismiss: () -> Unit, onAdd: (Double) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    val value = Amounts.parse(text)
+    val hours = t.unit.trim() == "h"
+    val value = if (hours) Amounts.parseHours(text) else Amounts.parse(text)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("${t.emoji}  ${t.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumberField(text, { text = it }, "How much${if (t.unit.isNotBlank()) " (${t.unit})" else ""}", isError = text.isNotBlank() && value == null, error = "A number above 0")
+                if (hours) {
+                    Text("How many hours did you do?", style = MaterialTheme.typography.bodyMedium)
+                    ChipRow(listOf(0.5, 1.0, 1.5, 2.0, 3.0), null, { Amounts.hoursText(it) }, { onAdd(it) })
+                }
+                if (hours) OutlinedTextField(
+                    value = text, onValueChange = { text = it.take(8) }, label = { Text("Other: 1.5 or 1:30") }, singleLine = true,
+                    isError = text.isNotBlank() && value == null, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Text),
+                )
+                else NumberField(text, { text = it }, "How much${if (t.unit.isNotBlank()) " (${t.unit})" else ""}", isError = text.isNotBlank() && value == null, error = "A number above 0")
                 Hint("Added to what's already logged for the day.")
             }
         },
@@ -599,27 +624,7 @@ private fun ProgressScreen(state: TargetState, today: LocalDate, onOpen: (Long) 
                 }
             }
         }
-        item(key = "month") {
-            val month = remember(state, today) { Goals.month(state.active.map { it.goal() to state.logsByDay(it.id) }, today) }
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(today.format(java.time.format.DateTimeFormatter.ofPattern("MMMM")) + " so far", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (month.counted == 0) "Nothing counted yet this month."
-                        else "${month.done} of ${month.counted} targets hit · ${Math.round(month.done * 100.0 / month.counted)}%",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    month.bestStreak?.let { (i, n) ->
-                        val t = state.active[i]
-                        Text("🔥 Longest streak: ${t.emoji} ${t.name}, $n ${if (t.goal().weekly) "wk" else if (n == 1) "day" else "days"}", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    month.mostImproved?.let { (i, pts) ->
-                        val t = state.active[i]
-                        Text("📈 Most improved: ${t.emoji} ${t.name}, up $pts points on last month", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        }
+        item(key = "summary") { SummaryCard(state, today) }
         item(key = "targets-title") { SectionLabel("Each target") }
         rates.forEach { (t, rate) ->
             item(key = "t-${t.id}") {
@@ -736,18 +741,31 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
                                 )
                                 Hint("Dashed line: each day's target time. Green dots were on time.")
                             }
-                            Kind.AMOUNT -> {
+                            Kind.AMOUNT -> if (goal.weekTotal) {
+                                SectionLabel("${t.unit.ifBlank { "Amount" }.replaceFirstChar { it.uppercase() }} each week, last 12 weeks")
+                                val weeks = (11 downTo 0).map { Goals.weekStart(today).minusWeeks(it.toLong()) }
+                                val values = weeks.map { w -> Goals.weekAmount(goal, byDay, w, today) }
+                                BarChart(
+                                    values = values,
+                                    labels = weeks.map { it.format(shortDate) },
+                                    colors = values.map { v -> Goals.tier(v, goal.goalValue)?.let { r -> resultColor(r) } ?: MaterialTheme.colorScheme.primary },
+                                    max = maxOf(goal.goalValue * 1.4, values.maxOrNull() ?: 0.0),
+                                    goal = goal.goalValue,
+                                    labelEvery = 3,
+                                )
+                                Hint("Dashed line: ${Amounts.withUnit(goal.goalValue, t.unit)} a week. Blue-green: 130% or more. Green: reached.")
+                            } else {
                                 SectionLabel("${t.unit.ifBlank { "Amount" }.replaceFirstChar { it.uppercase() }}, last 30 days")
                                 val values = days.map { Goals.amount(byDay[it].orEmpty()) }
                                 BarChart(
                                     values = values,
                                     labels = labels,
-                                    colors = values.map { if (it >= t.goalValue) resultColor(Result.DONE) else MaterialTheme.colorScheme.primary },
-                                    max = maxOf(t.goalValue * 1.2, values.maxOrNull() ?: 0.0),
+                                    colors = values.map { v -> Goals.tier(v, t.goalValue)?.let { r -> resultColor(r) } ?: MaterialTheme.colorScheme.primary },
+                                    max = maxOf(t.goalValue * 1.4, values.maxOrNull() ?: 0.0),
                                     goal = t.goalValue,
                                     labelEvery = 7,
                                 )
-                                Hint("Dashed line: your target of ${Amounts.withUnit(t.goalValue, t.unit)}. Green: reached.")
+                                Hint("Dashed line: your target of ${Amounts.withUnit(t.goalValue, t.unit)}. Teal: 130% or more. Green: reached. Lime: 80%. Amber: 60%.")
                             }
                             Kind.CHECK -> {
                                 SectionLabel("Done each week, last 12 weeks")
@@ -831,4 +849,60 @@ private fun DetailScreen(vm: TargetViewModel, state: TargetState?, id: Long, tod
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
     }
+}
+
+
+/** Weekly and monthly summary, with a Share button that sends it as text. */
+@Composable
+private fun SummaryCard(state: TargetState, today: LocalDate) {
+    val context = LocalContext.current
+    var monthly by rememberSaveable { mutableStateOf(false) }
+    var back by rememberSaveable { mutableStateOf(0) }
+    // The week runs Monday to Sunday, the month is the calendar month; "back" steps to earlier ones.
+    val (from, to, prevFrom, prevTo) = if (monthly) {
+        val f = today.withDayOfMonth(1).minusMonths(back.toLong())
+        val pf = f.minusMonths(1)
+        listOf(f, f.withDayOfMonth(f.lengthOfMonth()), pf, pf.withDayOfMonth(pf.lengthOfMonth()))
+    } else {
+        val f = Goals.weekStart(today).minusWeeks(back.toLong())
+        listOf(f, f.plusDays(6), f.minusWeeks(1), f.minusDays(1))
+    }
+    val summary = remember(state, from, to, today) {
+        Goals.summary(state.goals, state.active.map { it.unit }, from, to, prevFrom, prevTo, today)
+    }
+    val title = if (monthly) from.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+    else if (back == 0) "This week" else if (back == 1) "Last week" else "${from.format(shortDate)} – ${to.format(shortDate)}"
+    val text = summaryText(summary, state, title)
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ChipRow(listOf(false, true), monthly, { if (it) "Month" else "Week" }, { monthly = it; back = 0 })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { back++ }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Earlier") }
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                IconButton(onClick = { back-- }, enabled = back > 0) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Later") }
+            }
+            text.lines().forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            TextButton(onClick = {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "$title\n$text")
+                context.startActivity(android.content.Intent.createChooser(send, "Share summary"))
+            }) { Text("Share") }
+        }
+    }
+}
+
+private fun summaryText(s: Goals.Summary, state: TargetState, title: String): String {
+    if (s.counted == 0 && s.totals.isEmpty()) return "Nothing counted yet."
+    val lines = mutableListOf<String>()
+    val p = s.percent
+    if (p != null) {
+        val vs = s.previousPercent?.let { prev -> val d = p - prev; if (d == 0) " · same as before" else if (d > 0) " · up $d points" else " · down ${-d} points" } ?: ""
+        lines += "${s.done} of ${s.counted} targets hit · $p%$vs"
+    }
+    if (s.totals.isNotEmpty()) lines += "📊 " + s.totals.joinToString(" · ") { (unit, v) -> Amounts.withUnit(v, unit) }
+    if (s.overachieved > 0) lines += "⭐ Overachieved ${s.overachieved} ${if (s.overachieved == 1) "time" else "times"}"
+    s.bestDay?.let { lines += "💪 Best day: ${Days.short(it)}" }
+    s.toughestDay?.let { lines += "🪫 Toughest day: ${Days.short(it)}" }
+    s.top?.let { (i, pct) -> state.active.getOrNull(i)?.let { lines += "🏆 Most consistent: ${it.emoji} ${it.name}, $pct%" } }
+    s.weakest?.let { (i, pct) -> state.active.getOrNull(i)?.takeIf { s.top?.first != i }?.let { lines += "🎯 Needs attention: ${it.emoji} ${it.name}, $pct%" } }
+    return lines.joinToString("\n")
 }
