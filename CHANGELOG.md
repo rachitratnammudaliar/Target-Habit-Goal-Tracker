@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+Move more, study more, and see how the week went.
+
+- **Move target:** walking, running and steps count together, 10 km or 13,500 steps, whichever you're further along on. Samsung Health fills it in on Android
+- **Levels, not just done or missed:** 60% is partly achieved, 80% satisfied, 100% done, 130% overachieved ⭐. Satisfied days count as a hit, and partly achieved days keep your streak alive. Teal on the heatmap and charts marks an overachieved day
+- **Hours targets:** log how many hours you did (30 min, 1 h, 2 h or any amount like 1:30), for self-study, coding or reading
+- **Total for the week:** 15 hours of study in any amounts on any days, with the same levels
+- **Weekly and monthly summary** on Progress: targets hit against the period before, totals (km, steps, hours), overachieved count, best and toughest day, most consistent target and the one that needs attention. Browse earlier weeks and months, and Share it as text
+- **Fixed:** "In bed by 23:45" logged by hand as 02:00 counted as early for the next day. It is now after midnight, late, and counts for last night
+- Changed: a day with under 60% of an amount target is now Missed (it used to be "not quite" with any progress)
+
 ## 1.1.0
 
 Targets that fit a real timetable.

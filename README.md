@@ -79,6 +79,9 @@ Target only **reads**; it never writes to Samsung Health or sends anything anywh
 - **A different time on some days** (library by 10:00 on Tuesday, 13:00 on Thursday), or change **just today's** time when a class moves
 - **Overdue** once a time target's time has passed; "in bed by 23:00" logged after midnight counts for the night before
 - **Skip** a day, or **pause** a target for a holiday or exams, so it doesn't count against you
+- **Move target:** walking, running and steps together, 10 km or 13,500 steps. 60% is partly achieved, 80% satisfied, 100% done, 130% overachieved ⭐
+- **Hours targets** for self-study and reading: log hours, set a daily target or a total for the week
+- **Weekly and monthly summary** with totals, best and toughest day, and a Share button
 - **Notes** for a day: "exam week", "new route"
 - **Android widget:** today's targets on the home screen with a one-tap ✓
 
