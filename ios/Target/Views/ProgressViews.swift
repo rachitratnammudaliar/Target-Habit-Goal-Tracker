@@ -62,18 +62,7 @@ struct ProgressTab: View {
                         .padding(.vertical, 6)
                     }
 
-                    let month = Goals.month(store.goals, today)
-                    let list = store.active
-                    Section("\(today.monthName) so far") {
-                        Text(month.counted == 0 ? "Nothing counted yet this month." : "\(month.done) of \(month.counted) targets hit · \(Int((Double(month.done) * 100 / Double(month.counted)).rounded()))%")
-                        if let b = month.bestStreak, list.indices.contains(b.0) {
-                            let h = list[b.0]
-                            Text("🔥 Longest streak: \(h.emoji) \(h.name), \(b.1) \(h.goal.weekly ? "wk" : b.1 == 1 ? "day" : "days")")
-                        }
-                        if let m = month.mostImproved, list.indices.contains(m.0) {
-                            Text("📈 Most improved: \(list[m.0].emoji) \(list[m.0].name), up \(m.1) points on last month")
-                        }
-                    }
+                    SummarySection(today: today)
 
                     Section("Each target") {
                         ForEach(rates, id: \.0.id) { t, rate in
@@ -181,16 +170,30 @@ struct DetailView: View {
                     .frame(height: 180)
                     Text("Dashed line: each day's target time. Earlier is higher; green dots were on time.").font(.caption).foregroundColor(.secondary)
                 case .AMOUNT:
+                    if goal.weekTotal {
+                        let weeks = (0..<12).map { Goals.weekStart(today).plusDays(-7 * (11 - $0)) }
+                        Chart {
+                            ForEach(weeks, id: \.epochDay) { w in
+                                let v = Goals.weekAmount(goal, byDay, w, today)
+                                BarMark(x: .value("Week", w.date, unit: .weekOfYear), y: .value("Amount", v))
+                                    .foregroundStyle(Goals.tier(v, goal.goalValue).map { resultColor($0) } ?? Color.accentColor).cornerRadius(3)
+                            }
+                            RuleMark(y: .value("Target", goal.goalValue)).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 5])).foregroundStyle(.secondary)
+                        }
+                        .frame(height: 180)
+                        Text("Dashed line: \(Amounts.withUnit(goal.goalValue, t.unit)) a week. Blue-green: 130% or more. Green: reached.").font(.caption).foregroundColor(.secondary)
+                    } else {
                     Chart {
                         ForEach(days, id: \.epochDay) { d in
                             let v = Goals.amount(byDay[d] ?? [])
                             BarMark(x: .value("Day", d.date, unit: .day), y: .value("Amount", v))
-                                .foregroundStyle(v >= t.goalValue ? resultColor(.done) : Color.accentColor).cornerRadius(2)
+                                .foregroundStyle(Goals.tier(v, t.goalValue).map { resultColor($0) } ?? Color.accentColor).cornerRadius(2)
                         }
                         RuleMark(y: .value("Target", t.goalValue)).lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 5])).foregroundStyle(.secondary)
                     }
                     .frame(height: 180)
-                    Text("Dashed line: your target of \(Amounts.withUnit(t.goalValue, t.unit)). Green: reached.").font(.caption).foregroundColor(.secondary)
+                    Text("Dashed line: your target of \(Amounts.withUnit(t.goalValue, t.unit)). Teal: 130% or more. Green: reached. Lime: 80%. Amber: 60%.").font(.caption).foregroundColor(.secondary)
+                    }
                 case .CHECK:
                     let weeks = (0..<12).map { Goals.weekStart(today).plusDays(-7 * (11 - $0)) }
                     if goal.weekly {
@@ -286,5 +289,74 @@ struct DetailView: View {
         case .HEALTH: return "Samsung Health: \(Amounts.withUnit(e.value, t.unit))"
         case .SKIP: return "Skipped"
         }
+    }
+}
+
+
+/// Weekly and monthly summary, with a Share button that sends it as text.
+struct SummarySection: View {
+    @EnvironmentObject private var store: Store
+    let today: Day
+    @State private var monthly = false
+    @State private var back = 0
+
+    private static func monthTitle(_ d: Day) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US")
+        f.dateFormat = "MMMM yyyy"
+        return f.string(from: d.date)
+    }
+
+    var body: some View {
+        let from: Day, to: Day, prevFrom: Day, prevTo: Day
+        if monthly {
+            from = today.firstOfMonth.plusMonths(-back)
+            to = from.plusMonths(1).plusDays(-1)
+            prevFrom = from.plusMonths(-1)
+            prevTo = from.plusDays(-1)
+        } else {
+            from = Goals.weekStart(today).plusDays(-7 * back)
+            to = from.plusDays(6)
+            prevFrom = from.plusDays(-7)
+            prevTo = from.plusDays(-1)
+        }
+        let title = monthly ? Self.monthTitle(from) : back == 0 ? "This week" : back == 1 ? "Last week" : "\(from.format(.short)) – \(to.format(.short))"
+        let summary = Goals.summary(store.goals, units: store.active.map(\.unit), from: from, to: to, prevFrom: prevFrom, prevTo: prevTo, today: today)
+        let lines = Self.lines(summary, store.active)
+
+        Section {
+            Picker("Period", selection: Binding(get: { monthly }, set: { monthly = $0; back = 0 })) {
+                Text("Week").tag(false)
+                Text("Month").tag(true)
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Button { back += 1 } label: { Image(systemName: "chevron.left") }.buttonStyle(.borderless)
+                Text(title).font(.headline).frame(maxWidth: .infinity)
+                Button { back -= 1 } label: { Image(systemName: "chevron.right") }.buttonStyle(.borderless).disabled(back == 0)
+            }
+            ForEach(lines, id: \.self) { Text($0) }
+            ShareLink(item: title + "\n" + lines.joined(separator: "\n")) { Label("Share", systemImage: "square.and.arrow.up") }
+        }
+    }
+
+    static func lines(_ s: Goals.Summary, _ list: [Habit]) -> [String] {
+        if s.counted == 0 && s.totals.isEmpty { return ["Nothing counted yet."] }
+        var out: [String] = []
+        if let p = s.percent {
+            var vs = ""
+            if let prev = s.previousPercent {
+                let d = p - prev
+                vs = d == 0 ? " · same as before" : d > 0 ? " · up \(d) points" : " · down \(-d) points"
+            }
+            out.append("\(s.done) of \(s.counted) targets hit · \(p)%\(vs)")
+        }
+        if !s.totals.isEmpty { out.append("📊 " + s.totals.map { Amounts.withUnit($0.1, $0.0) }.joined(separator: " · ")) }
+        if s.overachieved > 0 { out.append("⭐ Overachieved \(s.overachieved) \(s.overachieved == 1 ? "time" : "times")") }
+        if let d = s.bestDay { out.append("💪 Best day: \(Days.names[d])") }
+        if let d = s.toughestDay { out.append("🪫 Toughest day: \(Days.names[d])") }
+        if let t = s.top, list.indices.contains(t.0) { out.append("🏆 Most consistent: \(list[t.0].emoji) \(list[t.0].name), \(t.1)%") }
+        if let w = s.weakest, list.indices.contains(w.0), s.top?.0 != w.0 { out.append("🎯 Needs attention: \(list[w.0].emoji) \(list[w.0].name), \(w.1)%") }
+        return out
     }
 }

@@ -17,6 +17,7 @@ struct EditView: View {
     @State private var notes: String
     @State private var dayTimes: [Int: Int]
     @State private var weekly: Int
+    @State private var weekTotal: Bool
     @State private var start: Date
     @State private var editingDay: Int?
     @State private var dayTime = Date()
@@ -36,19 +37,22 @@ struct EditView: View {
         _notes = State(initialValue: existing?.notes ?? "")
         _dayTimes = State(initialValue: DayTimes.parse(existing?.dayTimes ?? ""))
         _weekly = State(initialValue: existing?.weeklyTimes ?? 0)
+        _weekTotal = State(initialValue: existing?.weekTotal ?? false)
         _start = State(initialValue: Day(epochDay: existing?.startDay ?? Day.today().epochDay).localDate)
     }
 
-    private var weeklyOn: Bool { weekly > 0 && kind != .BY_TIME }
+    private var totalOn: Bool { weekTotal && kind == .AMOUNT }
+    private var weeklyOn: Bool { weekly > 0 && kind != .BY_TIME && !totalOn }
 
     private var minutes: Int {
         let c = Calendar.current.dateComponents([.hour, .minute], from: time)
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
     private var goalValue: Double? { Amounts.parse(goalText) }
-    private var stepValue: Double? { stepText.trimmingCharacters(in: .whitespaces).isEmpty ? 1 : Amounts.parse(stepText) }
+    private var defaultStep: Double { unit.trimmingCharacters(in: .whitespaces) == "h" ? 0.5 : 1 }
+    private var stepValue: Double? { stepText.trimmingCharacters(in: .whitespaces).isEmpty ? defaultStep : Amounts.parse(stepText) }
     private var invalid: Bool {
-        name.trimmingCharacters(in: .whitespaces).isEmpty || (days == 0 && !weeklyOn) || (kind == .AMOUNT && (goalValue == nil || stepValue == nil))
+        name.trimmingCharacters(in: .whitespaces).isEmpty || (days == 0 && !weeklyOn && !totalOn) || (kind == .AMOUNT && (goalValue == nil || stepValue == nil))
     }
 
     private func use(_ t: Template) {
@@ -61,6 +65,7 @@ struct EditView: View {
         stepText = ""
         days = t.days
         weekly = t.weeklyTimes
+        weekTotal = t.weekTotal
         dayTimes = [:]
     }
 
@@ -80,6 +85,7 @@ struct EditView: View {
         t.days = days == 0 ? Days.all : days
         t.dayTimes = kind == .BY_TIME ? DayTimes.format(dayTimes.filter { Days.has(t.days, $0.key - 1) }) : ""
         t.weeklyTimes = weeklyOn ? min(7, max(1, weekly)) : 0
+        t.weekTotal = totalOn
         t.startDay = Day(localDate: start).epochDay
         t.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         store.save(t)
@@ -129,6 +135,7 @@ struct EditView: View {
                             Spacer()
                             TextField("1", text: $stepText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                         }
+                        if !totalOn { Text("60% is partly achieved, 80% satisfied, 100% done and 130% overachieved.").font(.caption).foregroundColor(.secondary) }
                         if showErrors && (goalValue == nil || stepValue == nil) { Text("Use a number above 0").font(.caption).foregroundColor(.red) }
                     case .CHECK:
                         EmptyView()
@@ -138,17 +145,25 @@ struct EditView: View {
                 }
                 if kind != .BY_TIME {
                     Section {
-                        Picker("How often", selection: Binding(get: { weeklyOn }, set: { weekly = $0 ? (weekly > 0 ? weekly : 3) : 0 })) {
-                            Text("On set days").tag(false)
-                            Text("Times a week").tag(true)
+                        Picker("How often", selection: Binding(
+                            get: { totalOn ? 2 : weeklyOn ? 1 : 0 },
+                            set: { m in
+                                weekTotal = m == 2
+                                weekly = m == 1 ? (weekly > 0 ? weekly : 3) : 0
+                            }
+                        )) {
+                            Text("On set days").tag(0)
+                            Text("Times a week").tag(1)
+                            if kind == .AMOUNT { Text("Total for the week").tag(2) }
                         }
                         .pickerStyle(.segmented)
                         if weeklyOn { Stepper("\(weekly)× a week", value: $weekly, in: 1...7) }
                     } footer: {
-                        if weeklyOn { Text("Any days you like, Monday to Sunday. Good for runs or the gym when your timetable changes.") }
+                        if totalOn { Text("The target amount is the total for the whole week, in any amounts on any days. Good for self-study: 15 h a week.") }
+                        else if weeklyOn { Text("Any days you like, Monday to Sunday. Good for runs or the gym when your timetable changes.") }
                     }
                 }
-                if !weeklyOn {
+                if !weeklyOn && !totalOn {
                 Section {
                     Picker("Days", selection: $days) {
                         Text("Every day").tag(Days.all)

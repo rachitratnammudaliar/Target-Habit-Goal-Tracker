@@ -24,7 +24,7 @@ enum Kind: String, CaseIterable, Identifiable {
 
 /// Filled in from Samsung Health on Android. Kept on iPhone so backups move both ways.
 enum HealthSource: String, CaseIterable {
-    case NONE, STEPS, DISTANCE, RUN_DISTANCE, EXERCISE_MINUTES, ACTIVE_CALORIES
+    case NONE, STEPS, DISTANCE, MOVEMENT, RUN_DISTANCE, EXERCISE_MINUTES, ACTIVE_CALORIES
     static func from(_ name: String) -> HealthSource { HealthSource(rawValue: name) ?? .NONE }
 }
 
@@ -38,19 +38,23 @@ enum LogType: String {
 }
 
 enum Outcome: CaseIterable {
-    case done, late, partial, missed, skipped, pending, off
+    case done, over, good, late, partial, missed, skipped, pending, off
     var label: String {
         switch self {
         case .done: return "Done"
+        case .over: return "Overachieved"
+        case .good: return "Satisfied"
         case .late: return "Late"
-        case .partial: return "Not quite"
+        case .partial: return "Partly achieved"
         case .missed: return "Missed"
         case .skipped: return "Skipped"
         case .pending: return "To do"
         case .off: return "Rest day"
         }
     }
-    var counts: Bool { self == .done || self == .late || self == .partial || self == .missed }
+    var counts: Bool { self == .done || self == .over || self == .good || self == .late || self == .partial || self == .missed }
+    /// Counts as a hit: adds to a streak and to the hit rate.
+    var hit: Bool { self == .done || self == .over || self == .good }
 }
 
 struct Goal {
@@ -66,8 +70,10 @@ struct Goal {
     var weeklyTimes: Int = 0
     var pauseStart: Day?
     var pauseEnd: Day?
+    /// AMOUNT: goalValue is a total for the week (15 hours of study), not a daily amount.
+    var weekTotal: Bool = false
 
-    var weekly: Bool { weeklyTimes > 0 && kind != .BY_TIME }
+    var weekly: Bool { (weeklyTimes > 0 && kind != .BY_TIME) || (weekTotal && kind == .AMOUNT) }
 }
 
 struct Log {
@@ -158,9 +164,56 @@ enum Amounts {
         guard let v = Double(cleaned), v > 0, v <= 10_000_000, !v.isNaN else { return nil }
         return round(v)
     }
+
+    /// Hours: "1.5", "1,5" or "1:30" -> 1.5.
+    static func parseHours(_ text: String) -> Double? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        if t.contains(":") {
+            let parts = t.split(separator: ":", omittingEmptySubsequences: false)
+            guard parts.count == 2, let h = Int(parts[0].trimmingCharacters(in: .whitespaces)), let m = Int(parts[1].trimmingCharacters(in: .whitespaces)),
+                  h >= 0, (0...59).contains(m), !(h == 0 && m == 0), h <= 24 else { return nil }
+            return round(Double(h) + Double(m) / 60)
+        }
+        guard let v = parse(t), v <= 24 else { return nil }
+        return v
+    }
+
+    /// 0.5 -> "30 min", 1.5 -> "1 h 30", 2 -> "2 h".
+    static func hoursText(_ h: Double) -> String {
+        let total = Int((h * 60).rounded())
+        if total < 60 { return "\(total) min" }
+        return total % 60 == 0 ? "\(total / 60) h" : "\(total / 60) h \(total % 60)"
+    }
 }
 
 enum Goals {
+    /// 60% is partly achieved, 80% satisfied, 100% done, 130% overachieved.
+    static let partialAt = 0.6
+    static let goodAt = 0.8
+    static let overAt = 1.3
+    /// 10 km = 13,500 steps.
+    static let stepsPerKm = 1350.0
+
+    /// Kilometres you've effectively moved: the further of the distance and the steps.
+    static func movementKm(_ km: Double, _ steps: Double) -> Double { Amounts.round(max(km, steps / stepsPerKm)) }
+
+    static func tier(_ amount: Double, _ goal: Double) -> Outcome? {
+        if goal <= 0 { return nil }
+        if amount >= goal * overAt - 1e-9 { return .over }
+        if amount >= goal - 1e-9 { return .done }
+        if amount >= goal * goodAt - 1e-9 { return .good }
+        if amount >= goal * partialAt - 1e-9 { return .partial }
+        return nil
+    }
+
+    /// A time picked by hand. For an evening target (18:00 or later), 02:00 is after midnight:
+    /// 26:00 and late. Picked for today it belongs to last night.
+    static func pickAdjust(_ goal: Goal, _ day: Day, _ today: Day, _ minutes: Int, _ targetOn: (Day) -> Int) -> (Day, Int) {
+        if goal.kind != .BY_TIME || minutes >= nightCutoff { return (day, minutes) }
+        let night = (day == today && isScheduled(goal, day.plusDays(-1))) ? day.plusDays(-1) : day
+        return targetOn(night) >= 18 * 60 ? (night, minutes + 24 * 60) : (day, minutes)
+    }
+
     /// Before 04:00, logging an evening target ("in bed by 23:00") counts for the day before.
     static let nightCutoff = 4 * 60
 
@@ -216,8 +269,13 @@ enum Goals {
             if let t = time(logs) { return t <= targetTime(goal, logs, day) ? .done : .late }
         case .AMOUNT:
             let got = amount(logs)
-            if got >= goal.goalValue - 1e-9 { return .done }
-            if over && got > 0 && !goal.weekly { return .partial }
+            if goal.weekTotal {
+                if got > 0 { return .done }
+            } else {
+                let t = tier(got, goal.goalValue)
+                if t == .over || t == .done { return t! }
+                if over && !goal.weekly, let t = t { return t }
+            }
         }
         if goal.weekly {
             return weekStart(day) == weekStart(today) && !(today < day) ? .pending : .off
@@ -251,8 +309,21 @@ enum Goals {
         let end = monday.plusDays(6)
         if end < goal.startDay { return .off }
         if (0..<7).allSatisfy({ isPaused(goal, monday.plusDays($0)) }) { return .skipped }
+        if goal.weekTotal {
+            let t = tier(weekAmount(goal, byDay, monday, today), goal.goalValue)
+            if t == .over || t == .done { return t! }
+            if !(end < today) { return .pending }
+            return t ?? .missed
+        }
         if timesInWeek(goal, byDay, monday, today) >= goal.weeklyTimes { return .done }
         return end < today ? .missed : .pending
+    }
+
+    /// weekTotal targets: the amount added up over the week starting [monday], up to today.
+    static func weekAmount(_ goal: Goal, _ byDay: [Day: [Log]], _ monday: Day, _ today: Day) -> Double {
+        Amounts.round((0..<7).map { monday.plusDays($0) }
+            .filter { !(today < $0) && !($0 < goal.startDay) && !isPaused(goal, $0) }
+            .reduce(0) { $0 + amount(byDay[$1] ?? []) })
     }
 
     static func currentStreak(_ goal: Goal, _ byDay: [Day: [Log]], _ today: Day) -> Int {
@@ -260,22 +331,16 @@ enum Goals {
         if goal.weekly {
             var monday = weekStart(today)
             while !(monday.plusDays(6) < goal.startDay) && streak < 600 {
-                switch weekResult(goal, byDay, monday, today) {
-                case .done: streak += 1
-                case .pending, .skipped, .off: break
-                default: return streak
-                }
+                let w = weekResult(goal, byDay, monday, today)
+                if w.hit { streak += 1 } else if w == .pending || w == .skipped || w == .off || w == .partial {} else { return streak }
                 monday = monday.plusDays(-7)
             }
             return streak
         }
         var day = today
         while !(day < goal.startDay) {
-            switch result(goal, byDay[day] ?? [], day, today) {
-            case .done: streak += 1
-            case .off, .skipped, .pending: break
-            default: return streak
-            }
+            let r = result(goal, byDay[day] ?? [], day, today)
+            if r.hit { streak += 1 } else if r == .off || r == .skipped || r == .pending || r == .partial {} else { return streak }
             day = day.plusDays(-1)
             if today.epochDay - day.epochDay > 3660 { break }
         }
@@ -288,26 +353,22 @@ enum Goals {
         if goal.weekly {
             var monday = weekStart(first)
             while !(today < monday) {
-                switch weekResult(goal, byDay, monday, today) {
-                case .done:
+                let w = weekResult(goal, byDay, monday, today)
+                if w.hit {
                     run += 1
                     best = max(best, run)
-                case .pending, .skipped, .off: break
-                default: run = 0
-                }
+                } else if w == .pending || w == .skipped || w == .off || w == .partial {} else { run = 0 }
                 monday = monday.plusDays(7)
             }
             return best
         }
         var day = first
         while !(today < day) {
-            switch result(goal, byDay[day] ?? [], day, today) {
-            case .done:
+            let r = result(goal, byDay[day] ?? [], day, today)
+            if r.hit {
                 run += 1
                 best = max(best, run)
-            case .off, .skipped, .pending: break
-            default: run = 0
-            }
+            } else if r == .off || r == .skipped || r == .pending || r == .partial {} else { run = 0 }
             day = day.plusDays(1)
         }
         return best
@@ -325,13 +386,11 @@ enum Goals {
         if goal.weekly {
             var monday = weekStart(max(from, goal.startDay))
             while !(min(to, today) < monday) {
-                switch weekResult(goal, byDay, monday, today) {
-                case .done:
+                let w = weekResult(goal, byDay, monday, today)
+                if w.hit {
                     done += 1
                     counted += 1
-                case .missed: counted += 1
-                default: break
-                }
+                } else if w == .missed || w == .partial { counted += 1 }
                 monday = monday.plusDays(7)
             }
             return Rate(done: done, counted: counted)
@@ -340,7 +399,7 @@ enum Goals {
         let end = min(to, today)
         while !(end < day) {
             let r = result(goal, byDay[day] ?? [], day, today)
-            if r == .done { done += 1 }
+            if r.hit { done += 1 }
             if r.counts { counted += 1 }
             day = day.plusDays(1)
         }
@@ -359,7 +418,7 @@ enum Goals {
         for (goal, byDay) in goals {
             let r = result(goal, byDay[day] ?? [], day, today)
             if goal.weekly {
-                if r == .done {
+                if r.hit {
                     done += 1
                     scheduled += 1
                 } else if r == .pending && day == today && weekResult(goal, byDay, weekStart(day), today) == .pending {
@@ -369,7 +428,7 @@ enum Goals {
             }
             switch r {
             case .off, .skipped: break
-            case .done:
+            case .done, .over, .good:
                 done += 1
                 scheduled += 1
             default: scheduled += 1
@@ -383,8 +442,9 @@ enum Goals {
         switch goal.kind {
         case .CHECK: base = "Any time"
         case .BY_TIME: base = "By \(Times.format(goal.timeMinutes))" + (goal.dayTimes.isEmpty ? "" : " (varies)")
-        case .AMOUNT: base = Amounts.withUnit(goal.goalValue, unit)
+        case .AMOUNT: base = Amounts.withUnit(goal.goalValue, unit) + (goal.health == .MOVEMENT ? " or \(Amounts.format(goal.goalValue * stepsPerKm)) steps" : "")
         }
+        if goal.weekTotal { return base + " a week" }
         guard goal.weekly else { return base }
         return (goal.kind == .CHECK ? "" : "\(base), ") + "\(goal.weeklyTimes)× a week"
     }
@@ -398,6 +458,85 @@ enum Goals {
     }
 
     static func weekStart(_ day: Day) -> Day { day.plusDays(-Days.index(day)) }
+
+    // MARK: Weekly and monthly summary
+
+    struct Summary {
+        let from: Day
+        let to: Day
+        let done: Int
+        let counted: Int
+        let previousPercent: Int?
+        /// 0 = Monday … 6 = Sunday.
+        let bestDay: Int?
+        let toughestDay: Int?
+        let totals: [(String, Double)]
+        let overachieved: Int
+        let top: (Int, Int)?
+        let weakest: (Int, Int)?
+        var percent: Int? { counted == 0 ? nil : Int((Double(done) * 100 / Double(counted)).rounded()) }
+    }
+
+    static func summary(_ goals: [(Goal, [Day: [Log]])], units: [String], from: Day, to: Day, prevFrom: Day, prevTo: Day, today: Day) -> Summary {
+        let end = min(to, today)
+        var done = 0, counted = 0, prevDone = 0, prevCounted = 0, over = 0
+        var perTarget: [(Int, Int)] = []
+        var totals: [String: Double] = [:]
+        for (i, (goal, byDay)) in goals.enumerated() {
+            let rate = hitRate(goal, byDay, from, to, today)
+            done += rate.done
+            counted += rate.counted
+            let before = hitRate(goal, byDay, prevFrom, prevTo, today)
+            prevDone += before.done
+            prevCounted += before.counted
+            if let p = rate.percent { perTarget.append((i, p)) }
+            if goal.weekly {
+                var monday = weekStart(max(from, goal.startDay))
+                while !(end < monday) {
+                    if weekResult(goal, byDay, monday, today) == .over { over += 1 }
+                    monday = monday.plusDays(7)
+                }
+            } else {
+                var d = max(from, goal.startDay)
+                while !(end < d) {
+                    if result(goal, byDay[d] ?? [], d, today) == .over { over += 1 }
+                    d = d.plusDays(1)
+                }
+            }
+            if goal.kind == .AMOUNT {
+                var d = max(from, goal.startDay)
+                var sum = 0.0
+                while !(end < d) {
+                    if !isPaused(goal, d) { sum += amount(byDay[d] ?? []) }
+                    d = d.plusDays(1)
+                }
+                let unit = i < units.count ? units[i] : ""
+                if sum > 0 && !unit.isEmpty { totals[unit, default: 0] += sum }
+            }
+        }
+        var byWeekday: [Int: [Double]] = [:]
+        var d = from
+        while !(end < d) {
+            let sc = dayScore(goals, d, today)
+            if sc.scheduled > 0 && d != today { byWeekday[Days.index(d), default: []].append(sc.fraction) }
+            d = d.plusDays(1)
+        }
+        let avg = byWeekday.mapValues { $0.reduce(0, +) / Double($0.count) }
+        let best = avg.max { $0.value < $1.value }
+        let worst = avg.min { $0.value < $1.value }
+        let spread = best != nil && worst != nil && best!.key != worst!.key && best!.value - worst!.value >= 0.15
+        let order = ["km", "steps", "h", "min", "kcal"]
+        let sorted = totals.sorted { (order.firstIndex(of: $0.key) ?? 99, $0.key) < (order.firstIndex(of: $1.key) ?? 99, $1.key) }
+        return Summary(
+            from: from, to: to, done: done, counted: counted,
+            previousPercent: prevCounted == 0 ? nil : Int((Double(prevDone) * 100 / Double(prevCounted)).rounded()),
+            bestDay: spread ? best!.key : nil, toughestDay: spread ? worst!.key : nil,
+            totals: sorted.map { ($0.key, Amounts.round($0.value)) },
+            overachieved: over,
+            top: perTarget.count > 1 ? perTarget.max { $0.1 < $1.1 } : nil,
+            weakest: perTarget.count > 1 ? perTarget.min { $0.1 < $1.1 } : nil
+        )
+    }
 
     // MARK: Monthly report
 
@@ -439,13 +578,16 @@ struct Template {
     var unit: String = ""
     var days: Int = Days.all
     var weeklyTimes: Int = 0
+    var weekTotal: Bool = false
 }
 
 enum Templates {
     static let all: [Template] = [
         Template(emoji: "⏰", name: "Wake up", kind: .BY_TIME, timeMinutes: 7 * 60),
         Template(emoji: "📚", name: "At the library", kind: .BY_TIME, timeMinutes: 9 * 60, days: Days.weekdays),
+        Template(emoji: "🚶", name: "Move", kind: .AMOUNT, goalValue: 10, unit: "km"),
         Template(emoji: "🏃", name: "Run", kind: .AMOUNT, goalValue: 5, unit: "km", weeklyTimes: 3),
+        Template(emoji: "🎓", name: "Self-study", kind: .AMOUNT, goalValue: 15, unit: "h", weekTotal: true),
         Template(emoji: "👟", name: "Steps", kind: .AMOUNT, goalValue: 10_000, unit: "steps"),
         Template(emoji: "🔥", name: "Burn calories", kind: .AMOUNT, goalValue: 500, unit: "kcal"),
         Template(emoji: "💪", name: "Be active", kind: .AMOUNT, goalValue: 60, unit: "min"),

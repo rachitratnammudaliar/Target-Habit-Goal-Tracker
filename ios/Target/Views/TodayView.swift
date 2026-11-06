@@ -87,6 +87,8 @@ struct TargetRow: View {
     @State private var pickingTime = false
     @State private var movingTarget = false
     @State private var addingAmount = false
+    @State private var pickingHours = false
+    private var hours: Bool { target.unit.trimmingCharacters(in: .whitespaces) == "h" }
     @State private var editingNote = false
     @State private var pausing = false
     @State private var time = Date()
@@ -120,10 +122,14 @@ struct TargetRow: View {
         let status: String = {
             if paused, let end = goal.pauseEnd { return "Paused until \(end.format(.short))" }
             if result == .skipped { return "Skipped" }
+            if goal.weekTotal {
+                let got = Goals.amount(logs)
+                return "\(Amounts.format(Goals.weekAmount(goal, byDay, Goals.weekStart(day), today))) / \(Amounts.withUnit(goal.goalValue, t.unit)) this week" + (got > 0 ? " · +\(Amounts.format(got)) today" : "")
+            }
             if goal.weekly {
                 let n = Goals.timesInWeek(goal, byDay, Goals.weekStart(day), today)
                 if t.kindValue == .AMOUNT { return Goals.progressText(goal, logs, t.unit) + " · \(n)/\(goal.weeklyTimes) this wk" }
-                return "\(n) of \(goal.weeklyTimes) this week" + (result == .done ? " · done today" : "")
+                return "\(n) of \(goal.weeklyTimes) this week" + (result.hit ? " · done today" : "")
             }
             switch t.kindValue {
             case .BY_TIME:
@@ -131,8 +137,17 @@ struct TargetRow: View {
                 if overdue { return "Overdue · target \(Times.format(dayTarget))" }
                 if movedToday || dayTarget != t.timeMinutes { return "By \(Times.format(dayTarget))" + (day == today ? " today" : "") }
                 return Goals.goalText(goal, t.unit) + (result == .missed ? " · missed" : "")
-            case .AMOUNT: return Goals.progressText(goal, logs, t.unit)
-            case .CHECK: return result == .done ? "Done" : result == .missed ? "Missed" : "Any time today"
+            case .AMOUNT:
+                let level: String
+                switch Goals.tier(Goals.amount(logs), goal.goalValue) {
+                case .some(.over): level = " · ⭐ Overachieved"
+                case .some(.done): level = " · Done ✓"
+                case .some(.good): level = " · Satisfied"
+                case .some(.partial): level = " · Partly there"
+                default: level = ""
+                }
+                return Goals.progressText(goal, logs, t.unit) + level
+            case .CHECK: return result.hit ? "Done" : result == .missed ? "Missed" : "Any time today"
             }
         }()
         let streakText = streak >= 2 ? (goal.weekly ? "  ·  🔥 \(streak) wk" : "  ·  🔥 \(streak)") : ""
@@ -188,7 +203,10 @@ struct TargetRow: View {
                     }
                 case .AMOUNT:
                     Button {
-                        if let id = store.addAmount(t, day, t.step) {
+                        // Hours are asked for ("how many hours?"); other amounts add one step.
+                        if hours {
+                            pickingHours = true
+                        } else if let id = store.addAmount(t, day, t.step) {
                             showUndo($undo, "Added \(Amounts.withUnit(t.step, t.unit)) to \(t.name)") { store.deleteEntry(id) }
                         }
                     } label: { Image(systemName: "plus").frame(width: 30, height: 30) }
@@ -240,15 +258,24 @@ struct TargetRow: View {
             } onCancel: { movingTarget = false }
         }
         .alert("\(t.emoji) \(t.name)", isPresented: $addingAmount) {
-            TextField(t.unit.isEmpty ? "How much" : "How much (\(t.unit))", text: $amountText).keyboardType(.decimalPad)
+            TextField(t.unit.isEmpty ? "How much" : "How much (\(t.unit))", text: $amountText).keyboardType(hours ? .numbersAndPunctuation : .decimalPad)
             Button("Add") {
-                if let v = Amounts.parse(amountText), let id = store.addAmount(t, day, v) {
+                if let v = hours ? Amounts.parseHours(amountText) : Amounts.parse(amountText), let id = store.addAmount(t, day, v) {
                     showUndo($undo, "Added \(Amounts.withUnit(v, t.unit)) to \(t.name)") { store.deleteEntry(id) }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Added to what's already logged for the day.")
+            Text(hours ? "How many hours did you do? Like 1.5 or 1:30. Added to what's already logged for the day." : "Added to what's already logged for the day.")
+        }
+        .confirmationDialog("How many hours did you do?", isPresented: $pickingHours, titleVisibility: .visible) {
+            ForEach([0.5, 1, 1.5, 2, 3], id: \.self) { h in
+                Button(Amounts.hoursText(h)) {
+                    if let id = store.addAmount(t, day, h) { showUndo($undo, "Added \(Amounts.hoursText(h)) to \(t.name)") { store.deleteEntry(id) } }
+                }
+            }
+            Button("Other…") { amountText = ""; addingAmount = true }
+            Button("Cancel", role: .cancel) {}
         }
         .alert("Note for \(day == today ? "today" : day.format(.short))", isPresented: $editingNote) {
             TextField("Exam week, felt ill, new route…", text: $noteText)

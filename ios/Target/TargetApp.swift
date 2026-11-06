@@ -42,6 +42,8 @@ struct RootView: View {
 func resultColor(_ r: Outcome) -> Color {
     switch r {
     case .done: return Color(rgb: 0x16A34A)
+    case .over: return Color(rgb: 0x0891B2)
+    case .good: return Color(rgb: 0x65A30D)
     case .late, .partial: return Color(rgb: 0xD97706)
     case .missed: return Color(rgb: 0xDC2626)
     case .skipped: return Color(rgb: 0x94A3B8)
@@ -122,10 +124,10 @@ struct Heatmap: View {
 struct HeatmapKey: View {
     var body: some View {
         HStack(spacing: 10) {
-            ForEach([Outcome.done, .late, .missed, .skipped, .off], id: \.label) { r in
+            ForEach([Outcome.over, .done, .good, .late, .missed, .skipped, .off], id: \.label) { r in
                 HStack(spacing: 4) {
                     RoundedRectangle(cornerRadius: 2).fill(resultColor(r)).frame(width: 10, height: 10)
-                    Text(r == .late ? "Late / not quite" : r.label).font(.caption2).foregroundColor(.secondary)
+                    Text(r == .late ? "Late / partly" : r.label).font(.caption2).foregroundColor(.secondary)
                 }
             }
         }

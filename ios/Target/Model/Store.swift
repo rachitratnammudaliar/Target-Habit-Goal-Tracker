@@ -23,12 +23,15 @@ struct Habit: Identifiable, Equatable {
     /// Epoch days; pauseEnd 0 = not paused.
     var pauseStart: Int = 0
     var pauseEnd: Int = 0
+    /// AMOUNT: goalValue is the total for the week (15 hours of study).
+    var weekTotal: Bool = false
 
     var kindValue: Kind { Kind.from(kind) }
     var goal: Goal {
         Goal(kind: kindValue, goalValue: goalValue, timeMinutes: timeMinutes, days: days, startDay: Day(epochDay: startDay), health: HealthSource.from(health),
              dayTimes: DayTimes.parse(dayTimes), weeklyTimes: weeklyTimes,
-             pauseStart: pauseEnd > 0 ? Day(epochDay: pauseStart) : nil, pauseEnd: pauseEnd > 0 ? Day(epochDay: pauseEnd) : nil)
+             pauseStart: pauseEnd > 0 ? Day(epochDay: pauseStart) : nil, pauseEnd: pauseEnd > 0 ? Day(epochDay: pauseEnd) : nil,
+             weekTotal: weekTotal)
     }
     func paused(on day: Day) -> Bool { pauseEnd > 0 && (pauseStart...pauseEnd).contains(day.epochDay) }
 }
@@ -61,7 +64,7 @@ enum Backup {
             ["ref": h.id, "name": h.name, "emoji": h.emoji, "kind": h.kind, "goalValue": h.goalValue, "timeMinutes": h.timeMinutes,
              "unit": h.unit, "days": h.days, "health": h.health, "step": h.step, "startDay": h.startDay, "sortOrder": h.sortOrder,
              "archived": h.archived, "notes": h.notes, "createdAt": h.createdAt,
-             "dayTimes": h.dayTimes, "weeklyTimes": h.weeklyTimes, "pauseStart": h.pauseStart, "pauseEnd": h.pauseEnd]
+             "dayTimes": h.dayTimes, "weeklyTimes": h.weeklyTimes, "pauseStart": h.pauseStart, "pauseEnd": h.pauseEnd, "weekTotal": h.weekTotal]
         }
         let l: [[String: Any]] = entries.filter { ids.contains($0.targetId) }.map { e in
             ["target": e.targetId, "epochDay": e.epochDay, "type": e.type, "value": e.value, "createdAt": e.createdAt, "note": e.note]
@@ -112,7 +115,8 @@ enum Backup {
                 dayTimes: DayTimes.format(DayTimes.parse(string(o, "dayTimes"))),
                 weeklyTimes: max(0, min(7, number(o, "weeklyTimes")?.intValue ?? 0)),
                 pauseStart: max(0, number(o, "pauseStart")?.intValue ?? 0),
-                pauseEnd: max(0, number(o, "pauseEnd")?.intValue ?? 0)
+                pauseEnd: max(0, number(o, "pauseEnd")?.intValue ?? 0),
+                weekTotal: (o["weekTotal"] as? Bool) ?? false
             ))
         }
         let refs = Set(targets.map(\.id))
@@ -262,7 +266,10 @@ final class Store: ObservableObject {
     /// Done at [minutes] after midnight; replaces an earlier time for that day. The day's target
     /// time is saved with it, so changing the target later never rewrites this day.
     @discardableResult
-    func logTime(_ t: Habit, _ day: Day, _ minutes: Int) -> Int64 {
+    func logTime(_ t: Habit, _ pickedDay: Day, _ pickedMinutes: Int) -> Int64 {
+        // 02:00 on an "in bed by 23:45" target is after midnight: late, for the night it belongs to.
+        let goal = t.goal
+        let (day, minutes) = Goals.pickAdjust(goal, pickedDay, Day.today(), pickedMinutes) { n in Goals.targetTime(goal, logs(t.id, n), n) }
         if !entries.contains(where: { $0.targetId == t.id && $0.epochDay == day.epochDay && $0.type == LogType.TARGET.rawValue }) {
             entries.append(Entry(id: nextEntryId, targetId: t.id, epochDay: day.epochDay, type: LogType.TARGET.rawValue,
                                  value: Double(Goals.targetTime(t.goal, logs(t.id, day), day))))

@@ -186,4 +186,125 @@ final class TargetTests: XCTestCase {
         XCTAssertEqual(back.entries.first { $0.type == "NOTE" }?.note, "exam week")
         XCTAssertEqual(back.entries.first { $0.type == "TARGET" }?.value, 660)
     }
+
+    func testAmountLevels() {
+        let r10 = Goal(kind: .AMOUNT, goalValue: 10, startDay: d(60))
+        func day(_ km: Double) -> Outcome { Goals.result(r10, [Log(type: .HEALTH, date: d(1), value: km)], d(1), today) }
+        XCTAssertEqual(day(13), .over)
+        XCTAssertEqual(day(10), .done)
+        XCTAssertEqual(day(12.9), .done)
+        XCTAssertEqual(day(8), .good)
+        XCTAssertEqual(day(9.9), .good)
+        XCTAssertEqual(day(6), .partial)
+        XCTAssertEqual(day(7.9), .partial)
+        XCTAssertEqual(day(5.9), .missed)
+        XCTAssertEqual(Goals.result(r10, [Log(type: .HEALTH, date: today, value: 8)], today, today), .pending)
+        XCTAssertEqual(Goals.result(r10, [Log(type: .HEALTH, date: today, value: 14)], today, today), .over)
+        XCTAssertTrue(Outcome.good.hit && Outcome.over.hit && !Outcome.partial.hit)
+    }
+
+    func testMovementCountsDistanceOrStepsWhicheverIsMore() {
+        XCTAssertEqual(Goals.movementKm(3, 13_500), 10, accuracy: 1e-9)
+        XCTAssertEqual(Goals.movementKm(10, 4_000), 10, accuracy: 1e-9)
+        var move = Goal(kind: .AMOUNT, goalValue: 10)
+        move.health = .MOVEMENT
+        XCTAssertEqual(Goals.goalText(move, "km"), "10 km or 13,500 steps")
+    }
+
+    func testPartlyDaysKeepAStreakAliveButDontAddToIt() {
+        let goal = Goal(kind: .AMOUNT, goalValue: 10, startDay: d(30))
+        let logs: [Day: [Log]] = [
+            d(1): [Log(type: .HEALTH, date: d(1), value: 11)],
+            d(2): [Log(type: .HEALTH, date: d(2), value: 6.5)],
+            d(3): [Log(type: .HEALTH, date: d(3), value: 9)],
+            d(4): [Log(type: .HEALTH, date: d(4), value: 10)],
+            d(5): [Log(type: .HEALTH, date: d(5), value: 3)],
+        ]
+        XCTAssertEqual(Goals.currentStreak(goal, logs, today), 3)
+        let rate = Goals.hitRate(goal, logs, d(5), d(1), today)
+        XCTAssertEqual(rate.done, 3)
+        XCTAssertEqual(rate.counted, 5)
+    }
+
+    func testHoursForTheWeek() {
+        var study = Goal(kind: .AMOUNT, goalValue: 15, startDay: d(60))
+        study.weekTotal = true
+        XCTAssertTrue(study.weekly)
+        let monday = Goals.weekStart(today)
+        let logs: [Day: [Log]] = [
+            monday: [Log(type: .AMOUNT, date: monday, value: 3)],
+            monday.plusDays(1): [Log(type: .AMOUNT, date: monday.plusDays(1), value: 2.5), Log(type: .AMOUNT, date: monday.plusDays(1), value: 1)],
+        ]
+        XCTAssertEqual(Goals.weekAmount(study, logs, monday, today), 6.5, accuracy: 1e-9)
+        XCTAssertEqual(Goals.weekResult(study, logs, monday, today), .pending)
+        XCTAssertEqual(Goals.goalText(study, "h"), "15 h a week")
+        let last = monday.plusDays(-7)
+        func week(_ total: Double) -> [Day: [Log]] { [last: [Log(type: .AMOUNT, date: last, value: total)]] }
+        XCTAssertEqual(Goals.weekResult(study, week(20), last, today), .over)
+        XCTAssertEqual(Goals.weekResult(study, week(15), last, today), .done)
+        XCTAssertEqual(Goals.weekResult(study, week(12), last, today), .good)
+        XCTAssertEqual(Goals.weekResult(study, week(9), last, today), .partial)
+        XCTAssertEqual(Goals.weekResult(study, week(4), last, today), .missed)
+        XCTAssertEqual(Goals.currentStreak(study, week(15), today), 1)
+        XCTAssertEqual(Goals.result(study, logs[monday]!, monday, today), .done)
+        XCTAssertEqual(Goals.result(study, [], d(10), today), .off)
+    }
+
+    func testParsingHours() {
+        XCTAssertEqual(Amounts.parseHours("1.5"), 1.5)
+        XCTAssertEqual(Amounts.parseHours("1,5"), 1.5)
+        XCTAssertEqual(Amounts.parseHours("1:30"), 1.5)
+        XCTAssertEqual(Amounts.parseHours("0:45"), 0.75)
+        XCTAssertNil(Amounts.parseHours("0:00"))
+        XCTAssertNil(Amounts.parseHours("1:75"))
+        XCTAssertNil(Amounts.parseHours("30"))
+        XCTAssertNil(Amounts.parseHours("abc"))
+        XCTAssertEqual(Amounts.hoursText(0.5), "30 min")
+        XCTAssertEqual(Amounts.hoursText(1.5), "1 h 30")
+        XCTAssertEqual(Amounts.hoursText(2), "2 h")
+    }
+
+    func testATimePickedAfterMidnightForABedtimeIsLateForThatNight() {
+        let bed = Goal(kind: .BY_TIME, timeMinutes: 23 * 60 + 45, startDay: d(30))
+        let target: (Day) -> Int = { _ in 23 * 60 + 45 }
+        let (day, minutes) = Goals.pickAdjust(bed, today, today, 120, target)
+        XCTAssertEqual(day, d(1))
+        XCTAssertEqual(minutes, 26 * 60)
+        XCTAssertEqual(Goals.result(bed, [Log(type: .TIME, date: day, value: Double(minutes))], day, today), .late)
+        XCTAssertEqual(Goals.pickAdjust(bed, d(3), today, 120, target).0, d(3))
+        XCTAssertEqual(Goals.pickAdjust(bed, d(3), today, 120, target).1, 26 * 60)
+        XCTAssertEqual(Goals.pickAdjust(bed, today, today, 23 * 60 + 30, target).1, 23 * 60 + 30)
+        XCTAssertEqual(Goals.pickAdjust(bed, today, today, 240, target).1, 240)
+        let wake = Goal(kind: .BY_TIME, timeMinutes: 7 * 60)
+        XCTAssertEqual(Goals.pickAdjust(wake, today, today, 90) { _ in 7 * 60 }.1, 90)
+        XCTAssertEqual(Goals.pickAdjust(bed, d(1), today, 26 * 60, target).1, 26 * 60)
+    }
+
+    func testWeeklySummary() {
+        let move = Goal(kind: .AMOUNT, goalValue: 10, startDay: d(40))
+        let byDay: [Day: [Log]] = [
+            d(3): [Log(type: .HEALTH, date: d(3), value: 9)],
+            d(2): [Log(type: .HEALTH, date: d(2), value: 12)],
+            d(1): [Log(type: .HEALTH, date: d(1), value: 14)],
+        ]
+        let monday = Goals.weekStart(today)
+        let s = Goals.summary([(move, byDay)], units: ["km"], from: monday, to: monday.plusDays(6), prevFrom: monday.plusDays(-7), prevTo: monday.plusDays(-1), today: today)
+        XCTAssertEqual(s.done, 2)
+        XCTAssertEqual(s.counted, 2)
+        XCTAssertEqual(s.overachieved, 1)
+        XCTAssertEqual(s.totals.count, 1)
+        XCTAssertEqual(s.totals[0].0, "km")
+        XCTAssertEqual(s.totals[0].1, 26, accuracy: 1e-9)
+        XCTAssertEqual(s.percent, 100)
+        XCTAssertEqual(s.previousPercent, 14)
+    }
+
+    func testBackupKeepsWeekTotal() throws {
+        var h = Habit(id: 1, name: "Self-study", kind: Kind.AMOUNT.rawValue, goalValue: 15)
+        h.unit = "h"
+        h.weekTotal = true
+        let back = try Backup.decode(Backup.encode([h], []))
+        XCTAssertTrue(back.targets[0].weekTotal)
+        XCTAssertTrue(back.targets[0].goal.weekly)
+    }
 }
